@@ -2,27 +2,6 @@ ai_reply:
   enabled: true
   base_url: https://api.deepseek.com/v1
   api_key: sk-05428a42ce5442b4ad4d70d4d2944848
-  model: deepseek-chat
+  model: deepseek-v4-flash
   temperature: 0.7
   max_tokens: 120
-  timeout: 60
-comments:
-- '666'
-crawler:
-  max_comment_swipes: 5
-  max_video_stay: 6
-  max_videos_per_keyword: 3
-  min_video_stay: 3
-search:
-  keywords:
-  - 飞控
-  - 无人飞行器
-  sort_by: latest
-target:
-  keywords:
-  - 多少钱
-  - 怎么买
-  - 价格
-  - 联系
-  reply_texts:
-  - 你好
