@@ -1,0 +1,20 @@
+# 这是一个测试用的配置文件，供任务流调用
+device:
+  serial: "" # 如果您有多个设备，填入对应的无线 ADB 序列号，不填则读取最近绑定的
+  
+search:
+  keywords:
+    - "AI自动回复"
+    - "抖音获客软件"
+  sort_by: "latest" # 可选: "latest" (最新发布), "most_liked" (最多点赞)
+  
+crawler:
+  max_videos_per_keyword: 3 # 每个关键词最多刷多少个视频
+  min_video_stay: 3         # 刷完一个视频最少停留多少秒
+  max_video_stay: 6         # 刷完一个视频最多停留多少秒
+  max_comment_swipes: 2     # 在评论区最多向下滑动几次
+  
+comments:
+  - "这套系统确实好用，效率翻倍！"
+  - "支持一下，博主讲得很干货！"
+  - "这工具怎么获取呀？求分享！"

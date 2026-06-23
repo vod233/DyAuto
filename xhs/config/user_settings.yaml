@@ -1,0 +1,15 @@
+search:
+  keywords:
+  - 娃娃机制造
+  - 抓娃娃机制造
+  sort_by: comprehensive
+crawler:
+  max_daily_videos: 100
+  max_videos_per_keyword: 15
+  min_video_stay: 3
+  max_video_stay: 6
+interaction:
+  comments: []
+  target_keywords: []
+  reply_texts: []
+  max_comment_swipes: 2

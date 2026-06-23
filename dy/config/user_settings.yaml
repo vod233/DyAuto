@@ -1,0 +1,16 @@
+search:
+  keywords:
+  - 赛车
+  sort_by: latest
+crawler:
+  max_daily_videos: 100
+  max_videos_per_keyword: 5
+  min_video_stay: 3
+  max_video_stay: 6
+comments:
+- '666'
+target:
+  keywords: []
+  reply_texts: []
+interaction:
+  max_comment_swipes: 2
