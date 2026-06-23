@@ -45,9 +45,9 @@ def main():
         "search": {"keywords": ["AI获客"], "sort_by": "latest"},
         "ai_reply": {
             "enabled": True,
-            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "base_url": "https://api.deepseek.com/v1",
             "api_key": "",
-            "model": "qwen3.5-flash",
+            "model": "deepseek-v4-flash",
             "temperature": 0.7,
             "max_tokens": 120
         },

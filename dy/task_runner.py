@@ -153,7 +153,6 @@ class TikTokTaskFlow:
     def _video_loop(self):
         """核心的边刷边互动循环"""
         video_count = 0
-        comments_list = self.config.get('comments', [])
         max_videos = self.config.get('crawler', {}).get('max_videos_per_keyword', 10) # 默认刷10个测试
         max_daily_videos = self.config.get('crawler', {}).get('max_daily_videos', 100)
         
@@ -218,17 +217,13 @@ class TikTokTaskFlow:
                         self.db.update_interaction(video_id, "follow")
                     self._interruptible_sleep(1.5)
                     
-                    # B.3 发送视频评论（优先使用 AI 生成，AI 不可用时回退到话术库随机）
+                    # B.3 发送视频评论（标题驱动 AI 生成）
                     self._check_stop()
                     comment_text = self.reply_agent.generate_reply(
                         title=video_title,
                         keyword=self.current_keyword or ""
                     ) or ""
-                    
-                    if not comment_text and comments_list:
-                        comment_text = random.choice(comments_list)
-                        logger.info(f"📝 使用话术库随机评论: {comment_text}")
-                    
+
                     if comment_text:
                         if self.reply_agent.is_enabled():
                             logger.info(f"🤖 AI 生成回复: {comment_text}")
@@ -249,15 +244,12 @@ class TikTokTaskFlow:
                     
                     # B.4 处理评论区（找潜在客户）
                     self._check_stop()
-                    target_keywords = self.config.get('target', {}).get('keywords', [])
-                    reply_texts = self.config.get('target', {}).get('reply_texts', [])
-                    
                     if self.runner.run_action(OpenCommentSectionAction):
                         self._check_stop()
                         self.runner.run_action(
                             ProcessCommentSectionAction,
-                            potential_customer_keywords=target_keywords,
-                            auto_reply_texts=reply_texts,
+                            video_title=video_title,
+                            keyword=self.current_keyword or "",
                             check_stop_callback=self._check_stop
                         )
                     

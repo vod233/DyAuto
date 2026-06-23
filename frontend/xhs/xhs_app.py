@@ -290,7 +290,7 @@ def render_xhs_page():
 
             with col2:
                 with st.container(border=True, height=606):
-                    st.subheader("🤖 AI 标题回复配置")
+                    st.subheader("🤖 AI 配置")
                     ai_enabled = st.toggle(
                         "启用 AI 自动回复",
                         value=current_config.get("ai_enabled", True),
@@ -298,8 +298,8 @@ def render_xhs_page():
                     )
                     ai_base_url = st.text_input(
                         "OpenAI 兼容 Base URL",
-                        value=current_config.get("ai_base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-                        placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
+                        value=current_config.get("ai_base_url", "https://api.deepseek.com/v1"),
+                        placeholder="https://api.deepseek.com/v1"
                     )
                     ai_api_key = st.text_input(
                         "API Key",
@@ -308,8 +308,8 @@ def render_xhs_page():
                     )
                     ai_model = st.text_input(
                         "模型名称",
-                        value=current_config.get("ai_model", "qwen3.5-flash"),
-                        placeholder="qwen3.5-flash"
+                        value=current_config.get("ai_model", "deepseek-v4-flash"),
+                        placeholder="deepseek-v4-flash"
                     )
                     ai_temperature = st.slider(
                         "生成随机度",

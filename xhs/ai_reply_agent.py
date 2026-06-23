@@ -63,9 +63,21 @@ class XHSReplyAgent:
         return None
 
     def _call_model(self, title: str, keyword: str, strict_retry: bool = False) -> Optional[str]:
-        base_url = os.environ.get("DASHSCOPE_BASE_URL") or (self.ai_config.get("base_url") or "").strip()
-        api_key = os.environ.get("DASHSCOPE_API_KEY") or (self.ai_config.get("api_key") or "").strip()
-        model = os.environ.get("DASHSCOPE_MODEL") or (self.ai_config.get("model") or "").strip()
+        base_url = (
+            os.environ.get("DEEPSEEK_BASE_URL")
+            or os.environ.get("DASHSCOPE_BASE_URL")
+            or (self.ai_config.get("base_url") or "").strip()
+        )
+        api_key = (
+            os.environ.get("DEEPSEEK_API_KEY")
+            or os.environ.get("DASHSCOPE_API_KEY")
+            or (self.ai_config.get("api_key") or "").strip()
+        )
+        model = (
+            os.environ.get("DEEPSEEK_MODEL")
+            or os.environ.get("DASHSCOPE_MODEL")
+            or (self.ai_config.get("model") or "").strip()
+        )
 
         if not base_url or not api_key or not model:
             logger.warning("AI 回复配置不完整，需要填写 Base URL、API Key 和 Model。")

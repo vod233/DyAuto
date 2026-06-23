@@ -160,9 +160,9 @@ def _load_xhs_config_for_frontend():
         "max_daily_videos": data.get("crawler", {}).get("max_daily_videos", 100),
         "max_videos_per_keyword": data.get("crawler", {}).get("max_videos_per_keyword", 5),
         "ai_enabled": data.get("ai_reply", {}).get("enabled", True),
-        "ai_base_url": data.get("ai_reply", {}).get("base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+        "ai_base_url": data.get("ai_reply", {}).get("base_url", "https://api.deepseek.com/v1"),
         "ai_api_key": data.get("ai_reply", {}).get("api_key", ""),
-        "ai_model": data.get("ai_reply", {}).get("model", "qwen3.5-flash"),
+        "ai_model": data.get("ai_reply", {}).get("model", "deepseek-v4-flash"),
         "ai_temperature": data.get("ai_reply", {}).get("temperature", 0.7),
         "ai_max_tokens": data.get("ai_reply", {}).get("max_tokens", 120),
         # 抖音专属字段，小红书页面不需要但前端 AppConfig 要求返回
@@ -262,10 +262,11 @@ def _load_douyin_config_for_frontend():
         "min_video_stay": data.get("crawler", {}).get("min_video_stay", 3),
         "max_video_stay": data.get("crawler", {}).get("max_video_stay", 6),
         "max_comment_swipes": data.get("interaction", {}).get("max_comment_swipes", 2),
+        "max_ai_comment_reviews": data.get("interaction", {}).get("max_ai_comment_reviews", 20),
         "ai_enabled": data.get("ai_reply", {}).get("enabled", True),
         "ai_base_url": data.get("ai_reply", {}).get("base_url", "https://api.deepseek.com/v1"),
         "ai_api_key": data.get("ai_reply", {}).get("api_key", ""),
-        "ai_model": data.get("ai_reply", {}).get("model", "deepseek-chat"),
+        "ai_model": data.get("ai_reply", {}).get("model", "deepseek-v4-flash"),
         "ai_temperature": data.get("ai_reply", {}).get("temperature", 0.7),
         "ai_max_tokens": data.get("ai_reply", {}).get("max_tokens", 120),
     }
@@ -290,6 +291,7 @@ def _save_douyin_config(config: AppConfig):
         },
         "interaction": {
             "max_comment_swipes": config.max_comment_swipes,
+            "max_ai_comment_reviews": config.max_ai_comment_reviews,
         }
     }
     api_yaml_data = {

@@ -4,6 +4,7 @@ import random
 import logging
 from .base_action import BaseAction
 from .locators import TikTokLocators as L
+from ..ai_reply_agent import DYReplyAgent
 
 logger = logging.getLogger(__name__)
 
@@ -101,20 +102,37 @@ class ProcessCommentSectionAction(BaseAction):
     """处理评论区内容逻辑 (滑动并解析评论)"""
     def execute(self):
         logger.info("开始处理评论区内容...")
-        # 兼容 kwargs 传入的关键词参数
-        potential_customer_keywords = getattr(self, 'potential_customer_keywords', [])
-        auto_reply_texts = getattr(self, 'auto_reply_texts', ["你好"])
+        ai_agent = DYReplyAgent(self.config)
+        video_title = getattr(self, 'video_title', "")
+        keyword = getattr(self, 'keyword', "")
         
-        max_swipes = self.config.get('crawler', {}).get('max_comment_swipes', 3)
+        interaction_config = self.config.get('interaction', {})
+        max_swipes = int(interaction_config.get('max_comment_swipes', 2))
+        max_reviews = int(interaction_config.get('max_ai_comment_reviews', 20))
         processed_comments = set()
         swipe_count = 0
+        reviewed_count = 0
         
-        while swipe_count < max_swipes:
+        while swipe_count < max_swipes and reviewed_count < max_reviews:
             if hasattr(self, 'check_stop_callback'):
                 self.check_stop_callback()
                 
-            if self._process_current_screen_comments(processed_comments, potential_customer_keywords, auto_reply_texts):
+            found_target, reviewed_now = self._process_current_screen_comments(
+                processed_comments,
+                ai_agent,
+                video_title,
+                keyword,
+                max_reviews - reviewed_count,
+            )
+            reviewed_count += reviewed_now
+            logger.info(f"AI 已识别评论 {reviewed_count}/{max_reviews} 条")
+
+            if found_target:
                 logger.info("发现目标客户，完成互动，准备退出评论区")
+                break
+
+            if reviewed_count >= max_reviews:
+                logger.info("已达到 AI 评论识别上限，停止继续扫描评论区")
                 break
                 
             if self.d.xpath(L.COMMENT_NO_MORE_TEXT).exists:
@@ -132,20 +150,26 @@ class ProcessCommentSectionAction(BaseAction):
         self._close_comment_section()
         return True
 
-    def _process_current_screen_comments(self, processed_comments, potential_customer_keywords, auto_reply_texts):
+    def _process_current_screen_comments(self, processed_comments, ai_agent, video_title, keyword, remaining_reviews):
         logger.info("正在解析当前屏幕可见评论...")
         compose_nodes = self.d(className=L.COMPOSE_TEXT_CLASS)
         
         found_target = False
+        reviewed_count = 0
         if compose_nodes.exists:
             for i in range(len(compose_nodes)):
                 text = compose_nodes[i].info.get('text', '')
                 if text and text not in processed_comments:
                     processed_comments.add(text)
-                    if self._is_potential_customer(text, potential_customer_keywords):
-                        logger.info(f"🎯 发现潜在客户意向 (Compose模式): {text}")
-                        self._interact_with_potential_customer(auto_reply_texts)
+                    if not self._is_reviewable_comment(text):
+                        continue
+                    reviewed_count += 1
+                    if ai_agent.is_intent_comment(text, video_title=video_title, keyword=keyword):
+                        logger.info(f"🎯 AI 识别到意向评论 (Compose模式): {text}")
+                        self._interact_with_potential_customer(compose_nodes[i], text, ai_agent, video_title, keyword)
                         found_target = True
+                        break
+                    if reviewed_count >= remaining_reviews:
                         break
         else:
             content_nodes = self.d(resourceId=L.NATIVE_CONTENT_ID)
@@ -153,31 +177,88 @@ class ProcessCommentSectionAction(BaseAction):
                 text = content_nodes[i].info.get('text', '')
                 if text and text not in processed_comments:
                     processed_comments.add(text)
-                    if self._is_potential_customer(text, potential_customer_keywords):
-                        logger.info(f"🎯 发现潜在客户意向 (原生模式): {text}")
-                        self._interact_with_potential_customer(auto_reply_texts)
+                    if not self._is_reviewable_comment(text):
+                        continue
+                    reviewed_count += 1
+                    if ai_agent.is_intent_comment(text, video_title=video_title, keyword=keyword):
+                        logger.info(f"🎯 AI 识别到意向评论 (原生模式): {text}")
+                        self._interact_with_potential_customer(content_nodes[i], text, ai_agent, video_title, keyword)
                         found_target = True
                         break
-        return found_target
+                    if reviewed_count >= remaining_reviews:
+                        break
+        return found_target, reviewed_count
 
-    def _is_potential_customer(self, text, keywords):
-        if not keywords:
+    def _is_reviewable_comment(self, text):
+        if not text:
             return False
-        for kw in keywords:
-            if kw in text:
-                return True
-        return False
+        clean = str(text).strip()
+        if len(clean) < 4:
+            return False
+        ignored = {"作者", "置顶", "回复", "展开", "查看更多回复", "赞", "分享"}
+        return clean not in ignored
 
-    def _interact_with_potential_customer(self, auto_reply_texts):
-        reply_texts = auto_reply_texts if auto_reply_texts else ["你好"]
-        comment_to_send = random.choice(reply_texts)
-        self._send_comment_workflow(comment_to_send)
+    def _interact_with_potential_customer(self, comment_node, comment_text, ai_agent, video_title, keyword):
+        comment_to_send = ai_agent.generate_lead_reply(
+            comment_text,
+            video_title=video_title,
+            keyword=keyword,
+        )
+        if not comment_to_send:
+            logger.warning("未能生成楼中楼回复，跳过本条意向评论")
+            return
+        self._send_comment_workflow(comment_node, comment_to_send)
         time.sleep(1.5)
 
-    def _send_comment_workflow(self, text):
+    def _send_comment_workflow(self, comment_node, text):
         logger.info(f"回复内容: {text}")
-        # 具体回复逻辑可后续在 Action 中扩充
-        pass
+        try:
+            comment_node.click()
+            time.sleep(1)
+        except Exception as exc:
+            logger.warning(f"点击评论节点失败，尝试继续寻找回复输入框: {exc}")
+
+        if not self._focus_reply_input():
+            logger.warning("未找到楼中楼回复输入框")
+            return False
+
+        edit_text = self.d(className=L.COMMENT_EDIT_TEXT_CLASS)
+        if not edit_text.exists(timeout=2):
+            logger.warning("回复输入框不可用")
+            return False
+
+        edit_text.set_text(text)
+        time.sleep(0.8)
+
+        send_btn = self.d.xpath(L.COMMENT_SEND_BTN_XPATH)
+        if send_btn.exists:
+            send_btn.click()
+            logger.info("已发送楼中楼回复")
+            time.sleep(1.5)
+            return True
+
+        self.d.press("enter")
+        logger.info("通过回车键发送楼中楼回复")
+        time.sleep(1.5)
+        return True
+
+    def _focus_reply_input(self):
+        hints = [
+            "回复", "回复评论", "善语结善缘", "发条评论",
+            L.COMMENT_INPUT_HINT_1, L.COMMENT_INPUT_HINT_2,
+            L.COMMENT_INPUT_HINT_3, L.COMMENT_INPUT_HINT_4
+        ]
+        for hint in hints:
+            node = self.d(text=hint)
+            if node.exists(timeout=1):
+                node.click()
+                time.sleep(0.8)
+                return True
+
+        if self.d(className=L.COMMENT_EDIT_TEXT_CLASS).exists(timeout=1):
+            return True
+
+        return False
 
     def _swipe_up_comments(self):
         try:

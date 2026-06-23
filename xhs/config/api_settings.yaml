@@ -1,10 +1,10 @@
 # AI 回复配置
-# 推荐方式: 复制项目根目录 .env.example 为 .env，设置 DASHSCOPE_API_KEY 环境变量
+# 推荐方式: 复制项目根目录 .env.example 为 .env，设置 DEEPSEEK_API_KEY 环境变量
 # 也可以直接在下方 api_key 字段填入密钥 (不推荐，有泄漏风险)
 ai_reply:
   enabled: true
-  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-  api_key: ''   # 留空则从环境变量 DASHSCOPE_API_KEY 读取
-  model: qwen3.5-flash
+  base_url: https://api.deepseek.com/v1
+  api_key: ''   # 留空则从环境变量 DEEPSEEK_API_KEY 读取
+  model: deepseek-v4-flash
   temperature: 0.7
   max_tokens: 120

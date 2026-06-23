@@ -266,7 +266,7 @@ def render_douyin_page():
                 unsafe_allow_html=True
             )
 
-            # 将配置分为三大版块：左侧为搜索与基础控制，中间为互动与截流策略，右侧为 AI 回复配置
+            # 将配置分为三大版块：左侧为搜索与基础控制，中间为 AI 截流策略，右侧为 AI 回复配置
             col1, col2, col3 = st.columns(3)
 
             with col1:
@@ -292,37 +292,32 @@ def render_douyin_page():
                     max_stay = st.number_input("视频最大停留时间(秒)", value=current_config.get("max_video_stay", 6), min_value=1)
 
             with col2:
-                with st.container(border=True, height=320):
-                    st.subheader("💬 互动与评论话术")
-                    comments_str = st.text_area(
-                        "普通视频评论话术库 (每行一个，随机发送)", 
-                        value="\n".join(current_config.get("comments", [])),
-                        height=200,
-                        help="AI 评论未启用或生成失败时，将从此话术库随机选取"
+                with st.container(border=True, height=700):
+                    st.subheader("🎯 AI 截流获客策略")
+                    max_ai_reviews = st.number_input(
+                        "每个视频最多让 AI 识别多少条评论",
+                        value=int(current_config.get("max_ai_comment_reviews", 20)),
+                        min_value=1,
+                        max_value=200,
+                        step=1,
+                        help="达到上限后停止继续扫描评论区，降低风控和设备压力"
                     )
-
-                with st.container(border=True, height=360):
-                    st.subheader("🎯 截流获客策略")
-                    target_kw_str = st.text_area(
-                        "潜在客户识别词 (每行一个)", 
-                        value="\n".join(current_config.get("target_keywords", [])),
-                        height=100,
-                        help="当别人的评论中包含这些词时，系统将自动进行回复"
+                    max_swipes = st.number_input(
+                        "评论区最大向下滑动次数",
+                        value=current_config.get("max_comment_swipes", 2),
+                        min_value=1,
+                        max_value=30,
+                        help="控制评论区翻页深度，和识别条数上限共同生效"
                     )
-                    reply_str = st.text_area(
-                        "意向客户自动回复话术 (每行一个)", 
-                        value="\n".join(current_config.get("reply_texts", [])),
-                        height=100
-                    )
-                    max_swipes = st.number_input("评论区最大向下滑动次数", value=current_config.get("max_comment_swipes", 2), min_value=1)
+                    st.caption("系统会用 AI 判断评论是否有咨询、求推荐、想了解、求教程等意愿。命中后自动生成楼中楼回复，引导对方查看主页。")
 
             with col3:
                 with st.container(border=True, height=700):
-                    st.subheader("🤖 AI 标题回复配置")
+                    st.subheader("🤖 AI 配置")
                     ai_enabled = st.toggle(
-                        "启用 AI 自动回复",
+                        "启用 AI 自动回复与截流",
                         value=current_config.get("ai_enabled", True),
-                        help="抓取当前视频标题后，调用 DeepSeek 等 OpenAI 兼容接口自动生成评论"
+                        help="用于视频标题评论、评论区意向识别和楼中楼回复"
                     )
                     ai_base_url = st.text_input(
                         "OpenAI 兼容 Base URL",
@@ -336,8 +331,8 @@ def render_douyin_page():
                     )
                     ai_model = st.text_input(
                         "模型名称",
-                        value=current_config.get("ai_model", "deepseek-chat"),
-                        placeholder="deepseek-chat"
+                        value=current_config.get("ai_model", "deepseek-v4-flash"),
+                        placeholder="deepseek-v4-flash"
                     )
                     ai_temperature = st.slider(
                         "生成随机度",
@@ -353,7 +348,7 @@ def render_douyin_page():
                         max_value=512,
                         step=8
                     )
-                    st.caption("系统会按视频标题生成评论，并在后台追加社区公约过滤规则。")
+                    st.caption("同一套 AI 配置用于标题评论、评论区意向识别和楼中楼回复。")
 
             st.markdown("---")
             submitted = st.form_submit_button("💾 保存当前配置", type="primary", use_container_width=True)
@@ -363,14 +358,15 @@ def render_douyin_page():
                 payload = {
                     "search_keywords": [k.strip() for k in keywords_str.split("\n") if k.strip()],
                     "sort_by": sort_by,
-                    "comments": [c.strip() for c in comments_str.split("\n") if c.strip()],
-                    "target_keywords": [t.strip() for t in target_kw_str.split("\n") if t.strip()],
-                    "reply_texts": [r.strip() for r in reply_str.split("\n") if r.strip()],
+                    "comments": [],
+                    "target_keywords": [],
+                    "reply_texts": [],
                     "max_daily_videos": max_daily,
                     "max_videos_per_keyword": max_videos,
                     "min_video_stay": min_stay,
                     "max_video_stay": max_stay,
                     "max_comment_swipes": max_swipes,
+                    "max_ai_comment_reviews": max_ai_reviews,
                     "ai_enabled": ai_enabled,
                     "ai_base_url": ai_base_url.strip(),
                     "ai_api_key": ai_api_key.strip(),

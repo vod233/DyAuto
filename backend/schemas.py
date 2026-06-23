@@ -9,9 +9,9 @@ class AppConfig(BaseModel):
     max_daily_videos: int = 100
     # 小红书专属
     ai_enabled: bool = True
-    ai_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    ai_base_url: str = "https://api.deepseek.com/v1"
     ai_api_key: str = ""
-    ai_model: str = "qwen3.5-flash"
+    ai_model: str = "deepseek-v4-flash"
     ai_temperature: float = 0.7
     ai_max_tokens: int = 120
     # 抖音专属
@@ -21,6 +21,7 @@ class AppConfig(BaseModel):
     min_video_stay: int = 3
     max_video_stay: int = 6
     max_comment_swipes: int = 2
+    max_ai_comment_reviews: int = 20
 
 class DeviceConnectRequest(BaseModel):
     """连接新设备请求"""
