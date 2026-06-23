@@ -209,13 +209,43 @@ def _save_xhs_config(config: AppConfig):
 # ======================== 抖音配置逻辑 ========================
 
 def _load_douyin_runtime_config():
-    data = _load_yaml_file(DY_USER_CONFIG_PATH)
+    user_data = _load_yaml_file(DY_USER_CONFIG_PATH)
+    api_data = _load_yaml_file(DY_API_CONFIG_PATH)
+
+    normalized_user_data = {
+        key: value for key, value in user_data.items()
+        if key != "ai_reply"
+    }
+    normalized_api_data = {
+        key: value for key, value in api_data.items()
+        if key not in ("search", "crawler")
+    }
+
+    search_data = user_data.get("search") if isinstance(user_data.get("search"), dict) else {}
+    crawler_data = user_data.get("crawler") if isinstance(user_data.get("crawler"), dict) else {}
+    ai_reply_data = api_data.get("ai_reply") if isinstance(api_data.get("ai_reply"), dict) else {}
+
+    if not search_data and isinstance(api_data.get("search"), dict):
+        search_data = api_data["search"]
+    if not crawler_data and isinstance(api_data.get("crawler"), dict):
+        crawler_data = api_data["crawler"]
+    if not ai_reply_data and isinstance(user_data.get("ai_reply"), dict):
+        ai_reply_data = user_data["ai_reply"]
+
+    if search_data:
+        normalized_user_data["search"] = search_data
+    if crawler_data:
+        normalized_user_data["crawler"] = crawler_data
+    if ai_reply_data:
+        normalized_api_data["ai_reply"] = ai_reply_data
+
     return {
-        "search": data.get("search", {}),
-        "crawler": data.get("crawler", {}),
-        "comments": data.get("comments", []),
-        "target": data.get("target", {}),
-        "interaction": data.get("interaction", {}),
+        "search": normalized_user_data.get("search", {}),
+        "crawler": normalized_user_data.get("crawler", {}),
+        "comments": normalized_user_data.get("comments", []),
+        "target": normalized_user_data.get("target", {}),
+        "interaction": normalized_user_data.get("interaction", {}),
+        "ai_reply": normalized_api_data.get("ai_reply", {}),
     }
 
 
@@ -232,18 +262,17 @@ def _load_douyin_config_for_frontend():
         "min_video_stay": data.get("crawler", {}).get("min_video_stay", 3),
         "max_video_stay": data.get("crawler", {}).get("max_video_stay", 6),
         "max_comment_swipes": data.get("interaction", {}).get("max_comment_swipes", 2),
-        # 小红书专属字段，抖音页面不需要但前端 AppConfig 要求返回
-        "ai_enabled": True,
-        "ai_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "ai_api_key": "",
-        "ai_model": "qwen3.5-flash",
-        "ai_temperature": 0.7,
-        "ai_max_tokens": 120,
+        "ai_enabled": data.get("ai_reply", {}).get("enabled", True),
+        "ai_base_url": data.get("ai_reply", {}).get("base_url", "https://api.deepseek.com/v1"),
+        "ai_api_key": data.get("ai_reply", {}).get("api_key", ""),
+        "ai_model": data.get("ai_reply", {}).get("model", "deepseek-chat"),
+        "ai_temperature": data.get("ai_reply", {}).get("temperature", 0.7),
+        "ai_max_tokens": data.get("ai_reply", {}).get("max_tokens", 120),
     }
 
 
 def _save_douyin_config(config: AppConfig):
-    data = {
+    user_yaml_data = {
         "search": {
             "keywords": config.search_keywords,
             "sort_by": config.sort_by,
@@ -261,9 +290,20 @@ def _save_douyin_config(config: AppConfig):
         },
         "interaction": {
             "max_comment_swipes": config.max_comment_swipes,
+        }
+    }
+    api_yaml_data = {
+        "ai_reply": {
+            "enabled": config.ai_enabled,
+            "base_url": config.ai_base_url,
+            "api_key": config.ai_api_key,
+            "model": config.ai_model,
+            "temperature": config.ai_temperature,
+            "max_tokens": config.ai_max_tokens,
         },
     }
-    _save_yaml_file(DY_USER_CONFIG_PATH, data)
+    _save_yaml_file(DY_USER_CONFIG_PATH, user_yaml_data)
+    _save_yaml_file(DY_API_CONFIG_PATH, api_yaml_data)
 
 
 # ======================== API 路由 ========================

@@ -36,6 +36,8 @@ class DBManager:
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         video_id TEXT NOT NULL,
                         keyword TEXT,
+                        note_title TEXT DEFAULT '',
+                        ai_reply TEXT DEFAULT '',
                         url TEXT,
                         liked INTEGER DEFAULT 0,
                         commented INTEGER DEFAULT 0,
@@ -48,17 +50,28 @@ class DBManager:
                     CREATE INDEX IF NOT EXISTS idx_{table_name}_video_id 
                     ON {table_name} (video_id)
                 ''')
+                self._ensure_record_columns(cursor, table_name)
                 conn.commit()
             logger.info(f"已连接数据库并校验当日数据表: {table_name}")
         except Exception as e:
             logger.error(f"初始化数据库表失败: {e}")
+
+    def _ensure_record_columns(self, cursor, table_name):
+        """为历史表补齐新增字段，避免旧库升级后读写失败。"""
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+
+        if "note_title" not in existing_columns:
+            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN note_title TEXT DEFAULT ''")
+        if "ai_reply" not in existing_columns:
+            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN ai_reply TEXT DEFAULT ''")
 
     def _ensure_table(self):
         """确保执行操作前当天的表存在（应对跨天运行的情况）"""
         self._init_daily_table()
         return self._get_daily_table_name()
 
-    def record_video(self, video_id, keyword, url=""):
+    def record_video(self, video_id, keyword, url="", note_title=""):
         """
         记录一个新视频
         返回 True 表示是新视频并成功插入，返回 False 表示今天已经处理过该视频
@@ -74,13 +87,31 @@ class DBManager:
                 
                 # 插入新记录
                 cursor.execute(f'''
-                    INSERT INTO {table_name} (video_id, keyword, url)
-                    VALUES (?, ?, ?)
-                ''', (video_id, keyword, url))
+                    INSERT INTO {table_name} (video_id, keyword, note_title, url)
+                    VALUES (?, ?, ?, ?)
+                ''', (video_id, keyword, note_title, url))
                 conn.commit()
                 return True
         except Exception as e:
             logger.error(f"记录视频失败: {e}")
+            return False
+
+    def save_ai_reply(self, video_id, note_title="", ai_reply=""):
+        """保存标题和 AI 回复，便于数据看板展示。"""
+        table_name = self._ensure_table()
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(f'''
+                    UPDATE {table_name}
+                    SET note_title = COALESCE(NULLIF(?, ''), note_title),
+                        ai_reply = COALESCE(NULLIF(?, ''), ai_reply)
+                    WHERE video_id = ?
+                ''', (note_title, ai_reply, video_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"保存标题与 AI 回复失败: {e}")
             return False
 
     def update_interaction(self, video_id, action_type):
@@ -147,7 +178,7 @@ class DBManager:
                 cursor = conn.cursor()
                 cursor.execute(f'''
                     SELECT 
-                        video_id, keyword, url, liked, commented, followed, created_at 
+                        video_id, keyword, note_title, ai_reply, url, liked, commented, followed, created_at 
                     FROM {table_name}
                     ORDER BY created_at DESC
                     LIMIT ?
@@ -158,11 +189,13 @@ class DBManager:
                     records.append({
                         "video_id": row[0],
                         "keyword": row[1],
-                        "url": row[2],
-                        "liked": bool(row[3]),
-                        "commented": bool(row[4]),
-                        "followed": bool(row[5]),
-                        "created_at": row[6]
+                        "note_title": row[2] or "",
+                        "ai_reply": row[3] or "",
+                        "url": row[4],
+                        "liked": bool(row[5]),
+                        "commented": bool(row[6]),
+                        "followed": bool(row[7]),
+                        "created_at": row[8]
                     })
                 return records
         except Exception as e:

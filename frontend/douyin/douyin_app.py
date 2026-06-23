@@ -266,11 +266,11 @@ def render_douyin_page():
                 unsafe_allow_html=True
             )
 
-            # 将配置分为两大版块：左侧为搜索与基础控制，右侧为互动与截流策略
-            col1, col2 = st.columns(2)
+            # 将配置分为三大版块：左侧为搜索与基础控制，中间为互动与截流策略，右侧为 AI 回复配置
+            col1, col2, col3 = st.columns(3)
 
             with col1:
-                with st.container(border=True, height=360):
+                with st.container(border=True, height=320):
                     st.subheader("🔍 搜索与基础控制")
                     keywords_str = st.text_area(
                         "搜索关键词 (每行一个)", 
@@ -284,7 +284,7 @@ def render_douyin_page():
                         format_func=lambda x: "最新发布" if x == "latest" else "最多点赞"
                     )
 
-                with st.container(border=True, height=450):
+                with st.container(border=True, height=360):
                     st.subheader("⏱️ 爬虫控制")
                     max_daily = st.number_input("【全局】每日处理视频总上限", value=current_config.get("max_daily_videos", 100), min_value=1, help="当天处理过的所有视频数达到此数量后，手机将自动停止任务")
                     max_videos = st.number_input("每个关键词最多刷多少个视频", value=current_config.get("max_videos_per_keyword", 5), min_value=1)
@@ -292,15 +292,16 @@ def render_douyin_page():
                     max_stay = st.number_input("视频最大停留时间(秒)", value=current_config.get("max_video_stay", 6), min_value=1)
 
             with col2:
-                with st.container(border=True, height=360):
+                with st.container(border=True, height=320):
                     st.subheader("💬 互动与评论话术")
                     comments_str = st.text_area(
                         "普通视频评论话术库 (每行一个，随机发送)", 
                         value="\n".join(current_config.get("comments", [])),
-                        height=240
+                        height=200,
+                        help="AI 评论未启用或生成失败时，将从此话术库随机选取"
                     )
 
-                with st.container(border=True, height=450):
+                with st.container(border=True, height=360):
                     st.subheader("🎯 截流获客策略")
                     target_kw_str = st.text_area(
                         "潜在客户识别词 (每行一个)", 
@@ -314,6 +315,45 @@ def render_douyin_page():
                         height=100
                     )
                     max_swipes = st.number_input("评论区最大向下滑动次数", value=current_config.get("max_comment_swipes", 2), min_value=1)
+
+            with col3:
+                with st.container(border=True, height=700):
+                    st.subheader("🤖 AI 标题回复配置")
+                    ai_enabled = st.toggle(
+                        "启用 AI 自动回复",
+                        value=current_config.get("ai_enabled", True),
+                        help="抓取当前视频标题后，调用 DeepSeek 等 OpenAI 兼容接口自动生成评论"
+                    )
+                    ai_base_url = st.text_input(
+                        "OpenAI 兼容 Base URL",
+                        value=current_config.get("ai_base_url", "https://api.deepseek.com/v1"),
+                        placeholder="https://api.deepseek.com/v1"
+                    )
+                    ai_api_key = st.text_input(
+                        "API Key",
+                        value=current_config.get("ai_api_key", ""),
+                        type="password"
+                    )
+                    ai_model = st.text_input(
+                        "模型名称",
+                        value=current_config.get("ai_model", "deepseek-chat"),
+                        placeholder="deepseek-chat"
+                    )
+                    ai_temperature = st.slider(
+                        "生成随机度",
+                        min_value=0.0,
+                        max_value=1.5,
+                        value=float(current_config.get("ai_temperature", 0.7)),
+                        step=0.1
+                    )
+                    ai_max_tokens = st.number_input(
+                        "最大输出 Token",
+                        value=int(current_config.get("ai_max_tokens", 120)),
+                        min_value=32,
+                        max_value=512,
+                        step=8
+                    )
+                    st.caption("系统会按视频标题生成评论，并在后台追加社区公约过滤规则。")
 
             st.markdown("---")
             submitted = st.form_submit_button("💾 保存当前配置", type="primary", use_container_width=True)
@@ -330,7 +370,13 @@ def render_douyin_page():
                     "max_videos_per_keyword": max_videos,
                     "min_video_stay": min_stay,
                     "max_video_stay": max_stay,
-                    "max_comment_swipes": max_swipes
+                    "max_comment_swipes": max_swipes,
+                    "ai_enabled": ai_enabled,
+                    "ai_base_url": ai_base_url.strip(),
+                    "ai_api_key": ai_api_key.strip(),
+                    "ai_model": ai_model.strip(),
+                    "ai_temperature": ai_temperature,
+                    "ai_max_tokens": ai_max_tokens,
                 }
 
                 try:
@@ -464,7 +510,7 @@ def render_douyin_page():
                 col1.metric("今日处理视频总数", f"{stats.get('videos', 0)} 个", "自动防重过滤")
                 col2.metric("自动点赞数", f"{stats.get('likes', 0)} 次", "活跃度提升")
                 col3.metric("自动关注同行", f"{stats.get('follows', 0)} 人", "增加曝光")
-                col4.metric("自动评论/回复", f"{stats.get('comments', 0)} 次", "精准触达")
+                col4.metric("AI 自动回复", f"{stats.get('comments', 0)} 次", "标题驱动生成")
 
                 st.markdown("---")
                 st.subheader("📋 今日详细操作记录")
@@ -474,26 +520,41 @@ def render_douyin_page():
                     if details_resp.status_code == 200 and details_resp.json().get("success"):
                         records = details_resp.json().get("data", [])
                         if records:
-                            # 转换布尔值为可读的表情符号
-                            for r in records:
-                                r["liked"] = "✅" if r["liked"] else "❌"
-                                r["commented"] = "✅" if r["commented"] else "❌"
-                                r["followed"] = "✅" if r["followed"] else "❌"
+                            for idx, record in enumerate(records, start=1):
+                                liked_text = "✅ 已点赞" if record.get("liked") else "❌ 未点赞"
+                                commented_text = "✅ 已回复" if record.get("commented") else "❌ 未回复"
+                                followed_text = "✅ 已关注" if record.get("followed") else "❌ 未关注"
+                                title_text = record.get("note_title") or "未抓取到标题"
+                                reply_text = record.get("ai_reply") or "本条内容暂无可展示的 AI 回复内容"
+                                header = f"{idx}. {title_text[:28]}{'...' if len(title_text) > 28 else ''}"
 
-                            df = pd.DataFrame(records)
-                            # 重命名列以在前端展示
-                            df = df.rename(columns={
-                                "created_at": "操作时间",
-                                "keyword": "搜索关键词",
-                                "video_id": "视频标识",
-                                "liked": "是否点赞",
-                                "commented": "是否评论",
-                                "followed": "是否关注",
-                                "url": "视频链接"
-                            })
-                            # 调整列的顺序
-                            df = df[["操作时间", "搜索关键词", "视频标识", "是否点赞", "是否评论", "是否关注", "视频链接"]]
-                            st.dataframe(df, use_container_width=True, hide_index=True)
+                                with st.expander(header, expanded=(idx == 1)):
+                                    meta_cols = st.columns(4)
+                                    meta_cols[0].markdown(f"**时间**：{record.get('created_at', '-')}")
+                                    meta_cols[1].markdown(f"**关键词**：{record.get('keyword', '-') or '-'}")
+                                    meta_cols[2].markdown(f"**标识**：`{record.get('video_id', '-')}`")
+                                    if record.get("url"):
+                                        meta_cols[3].markdown(f"**链接**：[打开原内容]({record.get('url')})")
+                                    else:
+                                        meta_cols[3].markdown("**链接**：-")
+
+                                    st.markdown(f"**互动状态**：{liked_text} | {commented_text} | {followed_text}")
+                                    st.markdown("**内容标题**")
+                                    st.text_area(
+                                        f"title_{idx}",
+                                        value=title_text,
+                                        height=80,
+                                        disabled=True,
+                                        label_visibility="collapsed"
+                                    )
+                                    st.markdown("**AI 生成回复**")
+                                    st.text_area(
+                                        f"reply_{idx}",
+                                        value=reply_text,
+                                        height=120,
+                                        disabled=True,
+                                        label_visibility="collapsed"
+                                    )
                         else:
                             st.info("今日暂无操作记录。")
                     else:

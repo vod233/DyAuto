@@ -18,6 +18,17 @@ from .actions.commenting import (
 
 logger = logging.getLogger(__name__)
 
+
+def _load_yaml_file(path):
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except Exception as exc:
+        logger.warning(f"读取配置文件失败 {path}: {exc}")
+        return {}
+
 class ScoutTaskRunner:
     """
     核心调度中心（任务执行器）
@@ -28,10 +39,25 @@ class ScoutTaskRunner:
         logger.info("初始化任务调度中心...")
         
         # 0. 读取配置
-        self.config = {}
-        if config_path and os.path.exists(config_path):
-            with open(config_path, 'r', encoding='utf-8') as f:
-                self.config = yaml.safe_load(f) or {}
+        primary_config = _load_yaml_file(config_path)
+        config_dir = os.path.dirname(config_path) if config_path else os.path.join(
+            os.path.dirname(__file__), "config"
+        )
+        user_config = _load_yaml_file(os.path.join(config_dir, "user_settings.yaml"))
+        api_config = _load_yaml_file(os.path.join(config_dir, "api_settings.yaml"))
+
+        self.config = dict(primary_config)
+
+        search_config = user_config.get("search") or primary_config.get("search") or api_config.get("search")
+        crawler_config = user_config.get("crawler") or primary_config.get("crawler") or api_config.get("crawler")
+        ai_reply_config = api_config.get("ai_reply") or primary_config.get("ai_reply") or user_config.get("ai_reply")
+
+        if search_config:
+            self.config["search"] = search_config
+        if crawler_config:
+            self.config["crawler"] = crawler_config
+        if ai_reply_config:
+            self.config["ai_reply"] = ai_reply_config
 
         # 1. 设备连接层
         self.controller = ScoutControllerHybrid(serial=serial)

@@ -1,4 +1,5 @@
 import time
+import re
 import random
 import logging
 
@@ -13,6 +14,7 @@ from .actions.interaction import (
 from .actions.commenting import (
     PostCommentAction, OpenCommentSectionAction, ProcessCommentSectionAction
 )
+from .ai_reply_agent import DYReplyAgent
 from .db_manager import DBManager
 
 logger = logging.getLogger(__name__)
@@ -20,12 +22,13 @@ logger = logging.getLogger(__name__)
 class TikTokTaskFlow:
     """
     具体的业务任务流
-    将原子动作串联起来，形成如“搜索 -> 筛选 -> 刷视频 -> 互动”的完整逻辑
+    将原子动作串联起来，形成如"搜索 -> 筛选 -> 刷视频 -> 互动"的完整逻辑
     """
     def __init__(self, serial=None, config_path=None):
         self.runner = ScoutTaskRunner(serial=serial, config_path=config_path)
         self.config = self.runner.config
         self.db = DBManager()
+        self.reply_agent = DYReplyAgent(self.config)
         
         # 状态记录，用于防重防卡死
         self.last_share_token = None
@@ -192,12 +195,16 @@ class TikTokTaskFlow:
                 # B. 执行视频级互动
                 video_id = share_token if share_token else str(hash(description))
                 
+                # 提取视频标题用于AI生成评论
+                video_title = self._extract_title_from_description(description)
+                
                 # B.0 记录视频入库，如果已处理过则跳过
-                is_new = self.db.record_video(video_id, self.current_keyword, url)
+                is_new = self.db.record_video(video_id, self.current_keyword, url, note_title=video_title)
                 if not is_new:
                     logger.info("⏭️ 视频今日已处理过，跳过互动环节")
                 else:
                     logger.info("🎬 开始对新视频执行互动...")
+                    logger.info(f"📝 当前视频标题: {video_title}")
                     
                     # B.1 点赞
                     self._check_stop()
@@ -211,12 +218,34 @@ class TikTokTaskFlow:
                         self.db.update_interaction(video_id, "follow")
                     self._interruptible_sleep(1.5)
                     
-                    # B.3 发送视频评论
+                    # B.3 发送视频评论（优先使用 AI 生成，AI 不可用时回退到话术库随机）
                     self._check_stop()
-                    if comments_list:
+                    comment_text = self.reply_agent.generate_reply(
+                        title=video_title,
+                        keyword=self.current_keyword or ""
+                    ) or ""
+                    
+                    if not comment_text and comments_list:
                         comment_text = random.choice(comments_list)
+                        logger.info(f"📝 使用话术库随机评论: {comment_text}")
+                    
+                    if comment_text:
+                        if self.reply_agent.is_enabled():
+                            logger.info(f"🤖 AI 生成回复: {comment_text}")
+                        self.db.save_ai_reply(
+                            video_id,
+                            note_title=video_title,
+                            ai_reply=comment_text,
+                        )
                         if self.runner.run_action(PostCommentAction, comment_text):
                             self.db.update_interaction(video_id, "comment")
+                    else:
+                        self.db.save_ai_reply(
+                            video_id,
+                            note_title=video_title,
+                            ai_reply="",
+                        )
+                        logger.info("未生成可发布的回复，跳过评论环节。")
                     
                     # B.4 处理评论区（找潜在客户）
                     self._check_stop()
@@ -249,3 +278,19 @@ class TikTokTaskFlow:
             stay_time = random.uniform(min_stay, max_stay)
             logger.info(f"等待 {stay_time:.1f} 秒后处理下一个视频...")
             self._interruptible_sleep(stay_time)
+
+    def _extract_title_from_description(self, description):
+        """从视频描述中提取标题"""
+        if not description:
+            return self.current_keyword or "当前视频"
+        
+        lines = []
+        for raw_line in str(description).splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            line = re.sub(r"http[s]?://\S+", "", line).strip()
+            if 6 <= len(line) <= 60:
+                lines.append(line)
+        
+        return lines[0] if lines else (self.current_keyword or "当前视频")
