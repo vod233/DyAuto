@@ -1,6 +1,6 @@
 import logging
 import sys
-from xhs.core.device_mgr import ScoutControllerHybrid
+from dy.core.device_mgr import ScoutControllerHybrid
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 def test_device_connection():
     print("="*50)
-    print("🚀 开始测试自动化引擎连接逻辑...")
+    print("🚀 开始测试抖音自动化引擎连接逻辑...")
     print("="*50)
     
     try:

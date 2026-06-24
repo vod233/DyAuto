@@ -1,6 +1,7 @@
 import time
 import re
 import hashlib
+import random
 import logging
 from .base_action import BaseAction
 from .locators import TikTokLocators as L
@@ -19,25 +20,192 @@ class DoubleClickLikeAction(BaseAction):
         return True
 
 class FollowAuthorAction(BaseAction):
-    """滑动到作者主页并关注，然后返回视频页"""
+    """滑动到作者主页并关注，然后返回视频页（支持粉丝数过滤和私信功能）"""
+    
+    _FOLLOWER_PATTERNS = [
+        re.compile(r'(\d+(?:\.\d+)?)\s*[万wW]?\s*粉丝'),
+        re.compile(r'粉丝\s*(\d+(?:\.\d+)?)\s*[万wW]?'),
+        re.compile(r'(\d+(?:\.\d+)?)\s*[万wW]'),
+    ]
+    
     def execute(self):
         # 1. 滑动到主页
         w, h = self.d.window_size()
         self.d.swipe(int(w * 0.9), int(h / 2), int(w * 0.1), int(h / 2), duration=0.2)
         time.sleep(3)
         
-        # 2. 点击关注
-        follow_btn = self.d(text=L.PROFILE_FOLLOW_BTN, clickable=True)
-        if follow_btn.exists(timeout=2):
-            follow_btn.click()
-            logger.info("成功点击关注")
-        else:
-            logger.info("未找到'关注'按钮，可能已经关注过了")
-        time.sleep(1.5)
+        # 2. 获取作者粉丝数量
+        follower_count = self._extract_follower_count()
+        logger.info(f"作者粉丝数: {follower_count if follower_count else '未知'}")
         
-        # 3. 返回视频页
+        # 3. 根据阈值判断是否关注
+        min_followers = self._get_min_followers_threshold()
+        should_follow = True
+        if min_followers > 0 and follower_count is not None:
+            if follower_count < min_followers:
+                logger.info(f"作者粉丝数({follower_count})低于关注阈值({min_followers})，跳过关注")
+                should_follow = False
+        
+        # 4. 执行关注
+        if should_follow:
+            follow_btn = self.d(text=L.PROFILE_FOLLOW_BTN, clickable=True)
+            if follow_btn.exists(timeout=2):
+                follow_btn.click()
+                logger.info("成功点击关注")
+                time.sleep(1.5)
+            else:
+                logger.info("未找到'关注'按钮，可能已经关注过了")
+        
+        # 5. 判断是否发送私信（仅当成功关注且粉丝数大于私信阈值时）
+        if should_follow:
+            self._try_send_private_message(follower_count)
+        
+        # 6. 返回视频页
         self._return_to_video_page()
-        return True
+        return should_follow
+    
+    def _get_min_followers_threshold(self):
+        """获取配置的最小粉丝数阈值（单位：万）"""
+        return float(self.config.get('interaction', {}).get('min_followers_threshold', 0))
+    
+    def _try_send_private_message(self, follower_count):
+        """尝试发送私信（仅当粉丝数大于私信阈值时）"""
+        # 检查私信功能是否启用
+        if not self.config.get('interaction', {}).get('enable_private_message', False):
+            return
+        
+        # 检查粉丝数是否达到私信阈值
+        pm_threshold = float(self.config.get('interaction', {}).get('pm_followers_threshold', 10))
+        if follower_count is None or follower_count <= pm_threshold:
+            logger.info(f"作者粉丝数({follower_count})未达到私信阈值({pm_threshold})，跳过私信")
+            return
+        
+        # 获取私信话术列表
+        message_list = self.config.get('interaction', {}).get('pm_message_list', [])
+        if not message_list:
+            logger.warning("私信话术词库为空，无法发送私信")
+            return
+        
+        # 随机选择一条话术
+        message = random.choice(message_list)
+        logger.info(f"准备发送私信: {message}")
+        
+        # 执行私信发送
+        try:
+            self._send_private_message(message)
+        except Exception as e:
+            logger.error(f"发送私信失败: {e}")
+    
+    def _send_private_message(self, message):
+        """执行发送私信操作"""
+        # 1. 查找私信按钮（消息/私信图标）
+        message_btn = None
+        
+        # 方式1: 通过 content-desc 查找
+        message_nodes = self.d.xpath('//*[contains(@content-desc, "私信") or contains(@content-desc, "消息")]').all()
+        if message_nodes:
+            message_btn = message_nodes[0]
+            logger.info("通过 content-desc 找到私信按钮")
+        
+        # 方式2: 通过文本查找
+        if not message_btn:
+            message_text_nodes = self.d(text="私信").all()
+            if message_text_nodes:
+                message_btn = message_text_nodes[0]
+                logger.info("通过文本找到私信按钮")
+        
+        # 方式3: 通过常见位置坐标点击
+        if not message_btn:
+            w, h = self.d.window_size()
+            # 尝试点击页面常见的私信按钮位置（通常在头像下方或页面底部）
+            logger.info("未找到私信按钮，尝试常见位置")
+            # 尝试点击头像下方区域
+            self.d.click(int(w * 0.5), int(h * 0.35))
+            time.sleep(2)
+            
+            # 再次查找私信输入框
+            input_nodes = self.d(className="android.widget.EditText").all()
+            if input_nodes:
+                message_btn = input_nodes[0]
+                logger.info("找到输入框")
+        
+        if message_btn:
+            try:
+                message_btn.click()
+                time.sleep(2)
+            except Exception:
+                logger.warning("点击私信按钮失败，尝试直接查找输入框")
+        
+        # 2. 查找输入框并输入消息
+        input_edit = self.d(className="android.widget.EditText")
+        if input_edit.exists(timeout=3):
+            input_edit.set_text(message)
+            time.sleep(1)
+            
+            # 3. 查找发送按钮
+            send_btn = self.d.xpath('//*[@text="发送" or @content-desc="发送"]')
+            if send_btn.exists(timeout=2):
+                send_btn.click()
+                logger.info("私信发送成功")
+                time.sleep(2)
+            else:
+                # 尝试回车键发送
+                self.d.press("enter")
+                logger.info("通过回车键发送私信")
+                time.sleep(2)
+        else:
+            logger.warning("未找到私信输入框，无法发送私信")
+    
+    def _extract_follower_count(self):
+        """从作者主页提取粉丝数量（单位：万）"""
+        try:
+            # 方式1: 查找包含"粉丝"字样的节点
+            follower_nodes = self.d.xpath('//*[contains(@text, "粉丝")]').all()
+            for node in follower_nodes:
+                text = str(node.info.get('text', '')).strip()
+                if text:
+                    count = self._parse_follower_text(text)
+                    if count:
+                        return count
+            
+            # 方式2: 遍历所有 TextView 查找粉丝数
+            all_text_nodes = self.d.xpath('//android.widget.TextView').all()
+            for node in all_text_nodes:
+                text = str(node.info.get('text', '')).strip()
+                if text and ('粉丝' in text or ('万' in text and len(text) <= 8)):
+                    count = self._parse_follower_text(text)
+                    if count:
+                        return count
+            
+            return None
+        except Exception as e:
+            logger.warning(f"提取粉丝数量失败: {e}")
+            return None
+    
+    def _parse_follower_text(self, text):
+        """解析粉丝数字符串（支持"123万"、"123.4万"、"123456"等格式）"""
+        if not text:
+            return None
+        
+        for pattern in self._FOLLOWER_PATTERNS:
+            match = pattern.search(text)
+            if match:
+                try:
+                    num_str = match.group(1)
+                    value = float(num_str)
+                    # 如果文本中包含"万"，已经是万为单位；否则转换为万
+                    if '万' in text or 'W' in text or 'w' in text:
+                        return value
+                    else:
+                        # 小于6位的数字可能是直接显示的万数，大于等于6位是具体粉丝数
+                        if len(num_str) >= 6:
+                            return value / 10000
+                        else:
+                            return value
+                except ValueError:
+                    continue
+        
+        return None
 
     def _is_video_page_ready(self):
         comment_nodes = self.d.xpath(L.COMMENT_BTN_DYNAMIC).all()

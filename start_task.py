@@ -6,9 +6,9 @@ import concurrent.futures
 
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
-from xhs.task_runner import TikTokTaskFlow
-from xhs.logger_config import setup_logger
-from xhs.multi_device import select_devices_interactively
+from dy.task_runner import TikTokTaskFlow
+from dy.logger_config import setup_logger
+from dy.multi_device import select_devices_interactively
 
 # 初始化日志记录器，这行代码会自动创建 logs 文件夹和日期时间命名的日志文件
 setup_logger()
@@ -37,7 +37,7 @@ def main():
     
     config_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
-        "xhs", "config", "user_settings.yaml"
+        "dy", "config", "user_settings.yaml"
     )
     
     # 默认基础配置
@@ -63,7 +63,6 @@ def main():
             with open(config_path, 'r', encoding='utf-8') as f:
                 loaded = yaml.safe_load(f)
                 if loaded:
-                    # 简单合并字典
                     for k, v in loaded.items():
                         if isinstance(v, dict) and k in config:
                             config[k].update(v)
@@ -120,7 +119,6 @@ def main():
             logging.error(f"设备 {serial} 执行异常: {e}")
             
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(selected_devices)) as executor:
-        # 将选中的设备分发到不同线程执行
         futures = {executor.submit(run_on_device, serial): serial for serial in selected_devices}
         for future in concurrent.futures.as_completed(futures):
             serial = futures[future]
