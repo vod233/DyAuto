@@ -219,7 +219,11 @@ def render_xhs_page():
         else:
             for serial, info in status_data.items():
                 state = info.get("status")
-                if state == "running":
+                if state == "queued":
+                    st.info(f"🕒 设备 **{serial}**: 任务已提交，等待线程调度...")
+                elif state == "starting":
+                    st.info(f"🔄 设备 **{serial}**: 正在初始化设备连接并启动应用...")
+                elif state == "running":
                     st.info(f"▶️ 设备 **{serial}**: 正在执行任务中...")
                 elif state == "paused":
                     st.warning(f"⏸️ 设备 **{serial}**: 任务已暂停")
@@ -372,7 +376,7 @@ def render_xhs_page():
             def action_start():
                 try:
                     res = requests.post(f"{API_BASE_URL}/tasks/start", json={"devices": st.session_state.controlled_devices, "platform": "xhs"}).json()
-                    if res.get("success"): st.session_state.last_action_msg = "✅ 任务已开始！"
+                    if res.get("success"): st.session_state.last_action_msg = res.get("message", "✅ 任务已提交！")
                     else: st.session_state.last_action_err = res.get("message")
                 except Exception as e: st.session_state.last_action_err = f"请求开始任务失败: {e}"
 

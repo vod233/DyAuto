@@ -82,8 +82,20 @@ class TikTokLocators:
         "com.ss.android.ugc.aweme:id/btn_send",
         "com.ss.android.ugc.aweme:id/ero",
         "com.ss.android.ugc.aweme:id/jc=",
+        "com.ss.android.ugc.aweme:id/d_3",
+        "com.ss.android.ugc.aweme:id/d_4",
     )
     PM_SEND_BTN_ID = PM_SEND_BTN_IDS[0]
     PM_SEND_BTN_XPATH = '//*[@text="发送" or @content-desc="发送" or contains(@content-desc, "发送")]'
     PM_CLICKABLE_XPATH = '//*[@clickable="true"]'
     PM_MESSAGE_TEXT_XPATH = "//android.widget.TextView"
+    PM_SEND_FAILURE_TEXTS = (
+        "无法发送消息",
+        "发送失败",
+        "消息发送失败",
+        "隐私设置",
+        "对方拒收",
+        "操作频繁",
+        "稍后再试",
+        "被对方拉黑",
+    )

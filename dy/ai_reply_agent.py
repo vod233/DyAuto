@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import threading
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -9,6 +10,9 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 
 logger = logging.getLogger(__name__)
 LANGCHAIN_IMPORT_ERROR = None
+
+# API 并发限流信号量，最多同时 2000 个 DeepSeek API 调用（使用 deepseek-v4-flash 模型）
+_ai_api_semaphore = threading.Semaphore(2000)
 
 try:
     from langchain_core.messages import HumanMessage, SystemMessage
@@ -143,17 +147,19 @@ class DYReplyAgent:
         )
 
     def _call_langchain(self, title: str, keyword: str, base_url: str, api_key: str, model: str, strict_retry: bool) -> Optional[str]:
-        try:
-            llm = self._create_llm(base_url, api_key, model)
-            messages = [
-                SystemMessage(content=self._system_prompt(strict_retry)),
-                HumanMessage(content=self._human_prompt(title, keyword)),
-            ]
-            response = llm.invoke(messages)
-            return self._extract_response_text(response)
-        except Exception as exc:
-            logger.error(f"LangChain 调用 AI 回复失败: {exc}")
-            return None
+        # 使用信号量限制并发，避免 API 速率限制
+        with _ai_api_semaphore:
+            try:
+                llm = self._create_llm(base_url, api_key, model)
+                messages = [
+                    SystemMessage(content=self._system_prompt(strict_retry)),
+                    HumanMessage(content=self._human_prompt(title, keyword)),
+                ]
+                response = llm.invoke(messages)
+                return self._extract_response_text(response)
+            except Exception as exc:
+                logger.error(f"LangChain 调用 AI 回复失败: {exc}")
+                return None
 
     def _call_intent_model(self, comment_text: str, video_title: str, keyword: str) -> Optional[bool]:
         model_config = self._get_model_config()
@@ -161,32 +167,34 @@ class DYReplyAgent:
             return None
 
         base_url, api_key, model = model_config
-        try:
-            llm = self._create_llm(base_url, api_key, model, temperature=0.1, max_tokens=8)
-            messages = [
-                SystemMessage(content=(
-                    "你是抖音评论区线索筛选器。"
-                    "判断评论是否表达了明确需求、咨询意愿、购买/体验兴趣、想了解更多、求推荐、求教程、求链接、求价格、求方案。"
-                    "只输出 YES 或 NO。"
-                    "普通夸赞、调侃、无意义表情、单纯路过、泛泛赞同都输出 NO。"
-                )),
-                HumanMessage(content=(
-                    f"视频标题：{video_title or '未提供'}\n"
-                    f"搜索关键词：{keyword or '未提供'}\n"
-                    f"评论：{comment_text}\n"
-                    "这条评论是否有潜在客户意愿？"
-                )),
-            ]
-            response = llm.invoke(messages)
-            text = (self._extract_response_text(response) or "").strip().upper()
-            if text.startswith("YES"):
-                return True
-            if text.startswith("NO"):
-                return False
-            return None
-        except Exception as exc:
-            logger.error(f"AI 判断评论意向失败: {exc}")
-            return None
+        # 使用信号量限制并发，避免 API 速率限制
+        with _ai_api_semaphore:
+            try:
+                llm = self._create_llm(base_url, api_key, model, temperature=0.1, max_tokens=8)
+                messages = [
+                    SystemMessage(content=(
+                        "你是抖音评论区线索筛选器。"
+                        "判断评论是否表达了明确需求、咨询意愿、购买/体验兴趣、想了解更多、求推荐、求教程、求链接、求价格、求方案。"
+                        "只输出 YES 或 NO。"
+                        "普通夸赞、调侃、无意义表情、单纯路过、泛泛赞同都输出 NO。"
+                    )),
+                    HumanMessage(content=(
+                        f"视频标题：{video_title or '未提供'}\n"
+                        f"搜索关键词：{keyword or '未提供'}\n"
+                        f"评论：{comment_text}\n"
+                        "这条评论是否有潜在客户意愿？"
+                    )),
+                ]
+                response = llm.invoke(messages)
+                text = (self._extract_response_text(response) or "").strip().upper()
+                if text.startswith("YES"):
+                    return True
+                if text.startswith("NO"):
+                    return False
+                return None
+            except Exception as exc:
+                logger.error(f"AI 判断评论意向失败: {exc}")
+                return None
 
     def _call_lead_reply_model(self, comment_text: str, video_title: str, keyword: str, strict_retry: bool = False) -> Optional[str]:
         model_config = self._get_model_config()
@@ -195,29 +203,31 @@ class DYReplyAgent:
 
         base_url, api_key, model = model_config
         retry_line = "上一条结果太像营销，请改成更克制、更像真人顺手回复。" if strict_retry else ""
-        try:
-            llm = self._create_llm(base_url, api_key, model, max_tokens=80)
-            messages = [
-                SystemMessage(content=(
-                    "你是抖音评论区楼中楼回复助手。"
-                    "根据用户评论生成一条自然、简短的中文回复，引导对方去看我的主页资料。"
-                    "规则：1. 只输出回复正文；2. 10 到 32 个汉字；"
-                    "3. 可以提到“主页”，但不得出现微信、私信、电话、二维码、链接、价格承诺、夸大宣传；"
-                    "4. 不要使用 emoji、标签、连续感叹号；5. 语气像真人，不要强推。"
-                    f"{retry_line}"
-                )),
+        # 使用信号量限制并发，避免 API 速率限制
+        with _ai_api_semaphore:
+            try:
+                llm = self._create_llm(base_url, api_key, model, max_tokens=80)
+                messages = [
+                    SystemMessage(content=(
+                        "你是抖音评论区楼中楼回复助手。"
+                        "根据用户评论生成一条自然、简短的中文回复，引导对方去看我的主页资料。"
+                        "规则：1. 只输出回复正文；2. 10 到 32 个汉字；"
+                        "3. 可以提到主页，但不得出现微信、私信、电话、二维码、链接、价格承诺、夸大宣传；"
+                        "4. 不要使用 emoji、标签、连续感叹号；5. 语气像真人，不要强推。"
+                        f"{retry_line}"
+                    )),
                 HumanMessage(content=(
-                    f"视频标题：{video_title or '未提供'}\n"
-                    f"搜索关键词：{keyword or '未提供'}\n"
-                    f"用户评论：{comment_text}\n"
-                    "请生成一条适合楼中楼回复的引导话术。"
-                )),
-            ]
-            response = llm.invoke(messages)
-            return self._extract_response_text(response)
-        except Exception as exc:
-            logger.error(f"AI 生成截流回复失败: {exc}")
-            return None
+                        f"视频标题：{video_title or '未提供'}\n"
+                        f"搜索关键词：{keyword or '未提供'}\n"
+                        f"用户评论：{comment_text}\n"
+                        "请生成一条适合楼中楼回复的引导话术。"
+                    )),
+                ]
+                response = llm.invoke(messages)
+                return self._extract_response_text(response)
+            except Exception as exc:
+                logger.error(f"AI 生成截流回复失败: {exc}")
+                return None
 
     def _system_prompt(self, strict_retry: bool) -> str:
         retry_line = "如果第一次结果像营销话术，请改写得更像普通用户自然留言。" if strict_retry else ""

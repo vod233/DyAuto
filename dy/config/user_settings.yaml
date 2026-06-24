@@ -1,12 +1,11 @@
 search:
   keywords:
-  - 电脑技术
-  - 豆包
-  - deepseek
+  - chrome
+  - claude
   sort_by: latest
 crawler:
   max_daily_videos: 100
-  max_videos_per_keyword: 2
+  max_videos_per_keyword: 9
   min_video_stay: 1
   max_video_stay: 3
 comments: []
@@ -16,7 +15,7 @@ target:
 interaction:
   max_comment_swipes: 2
   max_ai_comment_reviews: 20
-  min_followers_threshold: 0.0
+  min_followers_threshold: 0.01
   enable_private_message: true
   pm_followers_threshold: 0.01
   pm_message_list:

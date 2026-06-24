@@ -3,6 +3,8 @@ import os
 import yaml
 import logging
 import concurrent.futures
+import threading
+import time
 
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"), override=True)
@@ -29,10 +31,114 @@ from backend.schemas import AppConfig, TaskStartRequest, TaskResponse, DeviceCon
 # 初始化全局日志
 setup_logger()
 
-# 全局任务状态追踪 { serial: {"status": "running" | "error" | "completed" | "stopped", "error": str} }
-task_status = {}
+# ======================== 全局并发控制 ========================
+# 任务状态字典与运行任务字典的线程锁
+_task_status_lock = threading.Lock()
+_task_status = {}
 # 保存正在运行的任务实例引用，以便可以调用 stop()
-running_tasks = {}
+_running_tasks = {}
+_stop_requested = set()
+# 全局线程池，限制最大并发设备数
+MAX_CONCURRENT_DEVICES = 10
+_task_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=MAX_CONCURRENT_DEVICES,
+    thread_name_prefix="device_task"
+)
+
+# 为了兼容旧代码，创建 task_status 和 running_tasks 的代理属性
+class _LockedDict:
+    """线程安全的字典代理"""
+    def __init__(self, lock, data):
+        self._lock = lock
+        self._data = data
+
+    def get(self, key, default=None):
+        with self._lock:
+            return self._data.get(key, default)
+
+    def __getitem__(self, key):
+        with self._lock:
+            return self._data[key]
+
+    def __setitem__(self, key, value):
+        with self._lock:
+            self._data[key] = value
+
+    def __delitem__(self, key):
+        with self._lock:
+            del self._data[key]
+
+    def __contains__(self, key):
+        with self._lock:
+            return key in self._data
+
+    def items(self):
+        with self._lock:
+            return list(self._data.items())
+
+    def values(self):
+        with self._lock:
+            return list(self._data.values())
+
+    def keys(self):
+        with self._lock:
+            return list(self._data.keys())
+
+    def pop(self, key, *args):
+        with self._lock:
+            return self._data.pop(key, *args)
+
+# 为了向后兼容，我们保留原始字典但用函数封装操作
+# 实际使用时通过 get_task_status / set_task_status / del_task_status 函数访问
+def get_task_status(serial, default=None):
+    with _task_status_lock:
+        return _task_status.get(serial, default)
+
+def set_task_status(serial, status):
+    with _task_status_lock:
+        _task_status[serial] = status
+
+def del_task_status(serial):
+    with _task_status_lock:
+        if serial in _task_status:
+            del _task_status[serial]
+
+def get_running_task(serial):
+    with _task_status_lock:
+        return _running_tasks.get(serial)
+
+def set_running_task(serial, task):
+    with _task_status_lock:
+        _running_tasks[serial] = task
+
+def del_running_task(serial):
+    with _task_status_lock:
+        if serial in _running_tasks:
+            del _running_tasks[serial]
+
+def get_all_running_tasks():
+    with _task_status_lock:
+        return list(_running_tasks.items())
+
+def is_task_running(serial):
+    with _task_status_lock:
+        status = _task_status.get(serial, {}).get("status")
+        return status in {"queued", "starting", "running", "paused"}
+
+def set_task_queued(serial, platform):
+    set_task_status(serial, {"status": "queued", "error": None, "platform": platform})
+
+def request_task_stop(serial):
+    with _task_status_lock:
+        _stop_requested.add(serial)
+
+def clear_task_stop_request(serial):
+    with _task_status_lock:
+        _stop_requested.discard(serial)
+
+def is_task_stop_requested(serial):
+    with _task_status_lock:
+        return serial in _stop_requested
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -40,12 +146,15 @@ async def lifespan(app: FastAPI):
     yield
     # 关闭时执行：优雅地清理所有后台正在运行的设备任务
     logging.info("接收到关闭信号，正在停止所有后台设备任务...")
-    for serial, task in list(running_tasks.items()):
+    for serial, task in get_all_running_tasks():
         try:
             task.stop()
             logging.info(f"已发送停止信号给设备: {serial}")
         except Exception as e:
             logging.error(f"停止设备 {serial} 时出错: {e}")
+    # 关闭线程池
+    _task_executor.shutdown(wait=True)
+    logging.info("线程池已关闭。")
 
 app = FastAPI(title="抖音自动化后端 API", version="1.0.0", lifespan=lifespan)
 
@@ -375,14 +484,15 @@ def api_disconnect_device(req: DeviceConnectRequest):
 
     logging.info(f"尝试断开设备连接: {serial}")
     if run_cmd([ADB_BIN, "disconnect", serial]):
-        if serial in running_tasks:
+        # 停止该设备上的任务并清理状态
+        task = get_running_task(serial)
+        if task:
             try:
-                running_tasks[serial].stop()
-                del running_tasks[serial]
+                task.stop()
             except Exception:
                 pass
-        if serial in task_status:
-            del task_status[serial]
+            del_running_task(serial)
+        del_task_status(serial)
         return {"success": True, "message": f"已成功断开设备 {serial} 的连接"}
     else:
         return {"success": False, "message": f"断开设备 {serial} 失败"}
@@ -447,10 +557,22 @@ def _get_config_path_for_platform(platform: str) -> str:
     return XHS_USER_CONFIG_PATH
 
 
-def run_task_on_device(serial: str, platform: str = "xhs"):
-    """后台执行实际任务的函数"""
-    task_status[serial] = {"status": "running", "error": None}
-    logging.info(f"==> API: 开始在设备 {serial} 上执行{platform}平台任务")
+def run_task_on_device(serial: str, platform: str = "xhs", startup_delay: float = 0):
+    """
+    后台执行实际任务的函数。
+    每个设备在独立线程中运行，线程由 _task_executor 统一调度。
+    支持短暂、可解释的启动错峰，避免多台设备同时初始化导致 USB/ADB 争抢。
+    """
+    set_task_status(serial, {"status": "starting", "error": None, "platform": platform})
+    if startup_delay > 0:
+        logging.info(f"设备 {serial} 将在 {startup_delay:.1f}s 后启动，避免 ADB 初始化瞬时争抢")
+        time.sleep(startup_delay)
+    if is_task_stop_requested(serial):
+        set_task_status(serial, {"status": "stopped", "error": None, "platform": platform})
+        logging.info(f"<== API: 设备 {serial} 在启动前已被取消")
+        clear_task_stop_request(serial)
+        return
+    logging.info(f"==> API: 开始初始化设备 {serial} 的{platform}平台任务")
 
     config_path = _get_config_path_for_platform(platform)
     try:
@@ -459,43 +581,58 @@ def run_task_on_device(serial: str, platform: str = "xhs"):
         else:
             task_flow = TikTokTaskFlow(serial=serial, config_path=config_path)
 
-        running_tasks[serial] = task_flow
+        set_running_task(serial, task_flow)
+        if is_task_stop_requested(serial):
+            task_flow.stop()
+            set_task_status(serial, {"status": "stopped", "error": None, "platform": platform})
+            logging.info(f"<== API: 设备 {serial} 初始化后检测到取消请求")
+            return
+        set_task_status(serial, {"status": "running", "error": None, "platform": platform})
+        logging.info(f"==> API: 设备 {serial} 已进入运行状态")
         task_flow.start()
 
         if task_flow.is_stopped:
-            task_status[serial]["status"] = "stopped"
+            set_task_status(serial, {"status": "stopped", "error": None})
             logging.info(f"<== API: 设备 {serial} 任务被手动停止")
         else:
-            task_status[serial]["status"] = "completed"
+            set_task_status(serial, {"status": "completed", "error": None})
             logging.info(f"<== API: 设备 {serial} 任务执行完毕")
 
     except InterruptedError as e:
-        task_status[serial] = {"status": "stopped", "error": str(e)}
+        set_task_status(serial, {"status": "stopped", "error": str(e)})
         logging.info(f"<== API: 设备 {serial} 任务已中断: {e}")
     except Exception as e:
-        task_status[serial] = {"status": "error", "error": str(e)}
+        set_task_status(serial, {"status": "error", "error": str(e)})
         logging.error(f"API: 设备 {serial} 执行异常: {e}")
     finally:
-        if serial in running_tasks:
-            del running_tasks[serial]
+        clear_task_stop_request(serial)
+        del_running_task(serial)
 
 
 @app.post("/api/tasks/start", summary="启动设备自动化任务")
-def api_start_tasks(req: TaskStartRequest, background_tasks: BackgroundTasks):
+def api_start_tasks(req: TaskStartRequest):
     if not req.devices:
         return {"success": False, "message": "未选择任何设备"}
 
     started_devices = []
-    for serial in req.devices:
-        if task_status.get(serial, {}).get("status") == "running":
+    skipped_devices = []
+    for index, serial in enumerate(req.devices):
+        if is_task_running(serial):
+            skipped_devices.append(serial)
             continue
-        background_tasks.add_task(run_task_on_device, serial, req.platform)
+        clear_task_stop_request(serial)
+        set_task_queued(serial, req.platform)
+        # 使用全局线程池调度任务，支持最大 MAX_CONCURRENT_DEVICES 并发
+        _task_executor.submit(run_task_on_device, serial, req.platform, min(index * 0.5, 3.0))
         started_devices.append(serial)
 
     if started_devices:
-        return {"success": True, "message": f"成功启动 {len(started_devices)} 台设备任务", "data": {"devices": started_devices}}
+        message = f"成功提交 {len(started_devices)} 台设备任务（最大并发 {MAX_CONCURRENT_DEVICES} 台）"
+        if skipped_devices:
+            message += f"，已跳过 {len(skipped_devices)} 台启动中/运行中的设备"
+        return {"success": True, "message": message, "data": {"devices": started_devices, "skipped": skipped_devices}}
     else:
-        return {"success": False, "message": "设备已在运行任务中，无法重复启动"}
+        return {"success": False, "message": "设备已在启动中或运行中，无法重复启动"}
 
 
 @app.post("/api/tasks/stop", summary="结束设备自动化任务")
@@ -505,8 +642,15 @@ def api_stop_tasks(req: TaskStartRequest):
 
     stopped_devices = []
     for serial in req.devices:
-        if serial in running_tasks:
-            running_tasks[serial].stop()
+        task = get_running_task(serial)
+        if task:
+            task.stop()
+            stopped_devices.append(serial)
+            continue
+        status = get_task_status(serial, {})
+        if status.get("status") in {"queued", "starting"}:
+            request_task_stop(serial)
+            set_task_status(serial, {"status": "stopped", "error": None, "platform": status.get("platform", req.platform)})
             stopped_devices.append(serial)
 
     if stopped_devices:
@@ -522,9 +666,10 @@ def api_pause_tasks(req: TaskStartRequest):
 
     paused_devices = []
     for serial in req.devices:
-        if serial in running_tasks:
-            running_tasks[serial].pause()
-            task_status[serial]["status"] = "paused"
+        task = get_running_task(serial)
+        if task:
+            task.pause()
+            set_task_status(serial, {"status": "paused", "error": None})
             paused_devices.append(serial)
 
     if paused_devices:
@@ -540,9 +685,10 @@ def api_resume_tasks(req: TaskStartRequest):
 
     resumed_devices = []
     for serial in req.devices:
-        if serial in running_tasks:
-            running_tasks[serial].resume()
-            task_status[serial]["status"] = "running"
+        task = get_running_task(serial)
+        if task:
+            task.resume()
+            set_task_status(serial, {"status": "running", "error": None})
             resumed_devices.append(serial)
 
     if resumed_devices:
@@ -553,7 +699,8 @@ def api_resume_tasks(req: TaskStartRequest):
 
 @app.get("/api/tasks/status", summary="查询所有设备的任务运行状态")
 def api_get_task_status():
-    return {"success": True, "status": task_status}
+    with _task_status_lock:
+        return {"success": True, "status": dict(_task_status)}
 
 
 @app.get("/api/logs", summary="获取最新系统日志")

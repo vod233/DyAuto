@@ -9,6 +9,7 @@ class DBManager:
     """
     SQLite 数据库管理器
     负责管理按天建表，并记录每天处理的视频数量、点赞、评论和关注等数据。
+    支持多线程并发写入（WAL 模式）。
     """
     def __init__(self):
         # 确定数据库存储路径
@@ -19,6 +20,17 @@ class DBManager:
         self.db_path = os.path.join(self.db_dir, "scout_records.db")
         self._init_daily_table()
 
+    def _get_connection(self):
+        """
+        获取配置了 WAL 模式和超时设置的数据库连接。
+        每次调用创建新连接，确保线程安全。
+        """
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        conn.execute("PRAGMA journal_mode=WAL")      # 开启 WAL 模式，支持读写并发
+        conn.execute("PRAGMA busy_timeout=5000")      # 写锁等待 5 秒
+        conn.execute("PRAGMA synchronous=NORMAL")      # 平衡安全与性能
+        return conn
+
     def _get_daily_table_name(self):
         """获取当天的表名，格式：records_YYYYMMDD"""
         today_str = datetime.datetime.now().strftime("%Y%m%d")
@@ -28,7 +40,7 @@ class DBManager:
         """初始化当天的统计表"""
         table_name = self._get_daily_table_name()
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 # 创建每天的记录表
                 cursor.execute(f'''
@@ -81,7 +93,7 @@ class DBManager:
         """
         table_name = self._ensure_table()
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 # 检查是否已存在
                 cursor.execute(f"SELECT id FROM {table_name} WHERE video_id = ?", (video_id,))
@@ -103,7 +115,7 @@ class DBManager:
         """保存标题和 AI 回复，便于数据看板展示。"""
         table_name = self._ensure_table()
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(f'''
                     UPDATE {table_name}
@@ -136,7 +148,7 @@ class DBManager:
         field_name = field_map[action_type]
         
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(f'''
                     UPDATE {table_name} 
@@ -153,7 +165,7 @@ class DBManager:
         """获取当天的汇总统计数据"""
         table_name = self._ensure_table()
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(f'''
                     SELECT 
@@ -180,7 +192,7 @@ class DBManager:
         """获取当天的详细操作记录，按时间倒序排列"""
         table_name = self._ensure_table()
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(f'''
                     SELECT 

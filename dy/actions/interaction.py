@@ -275,16 +275,82 @@ class FollowAuthorAction(BaseAction):
         return None
 
     def _click_node(self, node):
+        bounds = _node_bounds(node)
+        if bounds:
+            x, y = _bounds_center(bounds)
+            self.d.click(x, y)
+            return True
+
         try:
             node.click()
             return True
         except Exception:
-            bounds = _node_bounds(node)
-            if not bounds:
-                return False
-            x, y = _bounds_center(bounds)
+            return False
+
+    def _input_contains_message(self, message):
+        input_edit = self._find_private_message_input(timeout=0.8)
+        if not input_edit:
+            return False
+        current_text = str(input_edit.info.get('text', '') or '').strip()
+        return bool(current_text and message in current_text)
+
+    def _click_send_text_center(self):
+        send_nodes = self.d.xpath(L.PM_SEND_BTN_XPATH).all()
+        candidates = [node for node in send_nodes if _is_visible_enabled(node)]
+        if not candidates:
+            return False
+
+        node = sorted(candidates, key=_bounds_bottom)[-1]
+        bounds = _node_bounds(node)
+        if not bounds:
+            return False
+        x, y = _bounds_center(bounds)
+        logger.info(f"通过发送文字中心坐标点击私信发送按钮: ({x}, {y})")
+        self.d.click(x, y)
+        return True
+
+    def _click_bottom_right_send_area(self):
+        width, height = self.d.window_size()
+        click_points = (
+            (int(width * 0.92), int(height * 0.91)),
+            (int(width * 0.92), int(height * 0.86)),
+            (int(width * 0.96), int(height * 0.91)),
+        )
+        for x, y in click_points:
+            logger.info(f"尝试点击私信页面右下发送区域: ({x}, {y})")
             self.d.click(x, y)
+            time.sleep(0.8)
             return True
+        return False
+
+    def _wait_until_private_message_sent(self, message, timeout=2.5):
+        deadline = time.time() + timeout
+        cleared_at = None
+        while time.time() < deadline:
+            if self._has_private_message_failure():
+                return False
+            if self._input_contains_message(message):
+                cleared_at = None
+                time.sleep(0.3)
+                continue
+            if self._verify_message_sent(message):
+                return True
+            if cleared_at is None:
+                cleared_at = time.time()
+            elif time.time() - cleared_at >= 1.2:
+                return not self._has_private_message_failure()
+            time.sleep(0.3)
+        return False
+
+    def _refind_input_or_original(self, input_edit):
+        fresh = self._find_private_message_input(timeout=0.8)
+        return fresh or input_edit
+
+    def _click_send_button_by_nearby_node(self, input_edit):
+        send_btn = self._find_private_message_send_button(input_edit)
+        if not send_btn:
+            return False
+        return self._click_node(send_btn)
 
     def _click_send_area_next_to_input(self, input_edit):
         """图标按钮无法被 UIAutomator 识别时，点击输入框同行最右侧区域。"""
@@ -314,8 +380,10 @@ class FollowAuthorAction(BaseAction):
     def _send_private_message_from_input(self, input_edit, message):
         """从已输入文本的私信输入框执行发送，并验证输入框被清空。"""
         send_attempts = [
-            ("send_button", lambda: self._click_private_send_button(input_edit)),
-            ("right_side_coordinate", lambda: self._click_send_area_next_to_input(input_edit)),
+            ("send_button_center", lambda: self._click_send_button_by_nearby_node(self._refind_input_or_original(input_edit))),
+            ("send_text_center", self._click_send_text_center),
+            ("input_row_coordinate", lambda: self._click_send_area_next_to_input(self._refind_input_or_original(input_edit))),
+            ("bottom_right_coordinate", self._click_bottom_right_send_area),
             ("ime_send_action", self._send_ime_action),
             ("enter_key", lambda: self.d.press("enter") or True),
         ]
@@ -325,10 +393,12 @@ class FollowAuthorAction(BaseAction):
                 logger.info(f"尝试私信发送方式: {name}")
                 if action() is False:
                     continue
-                time.sleep(1.8)
-                if self._verify_private_message_sent(message):
+                if self._wait_until_private_message_sent(message):
                     logger.info(f"私信发送方式成功: {name}")
                     return True
+                if self._has_private_message_failure():
+                    logger.warning("检测到抖音私信发送失败提示，停止继续重试")
+                    return False
             except Exception as e:
                 logger.warning(f"私信发送方式失败 ({name}): {e}")
 
@@ -336,6 +406,8 @@ class FollowAuthorAction(BaseAction):
 
     def _verify_private_message_sent(self, message):
         """确认消息已发送；先查消息气泡，再用输入框状态兜底。"""
+        if self._has_private_message_failure():
+            return False
         if self._verify_message_sent(message):
             return True
 
@@ -345,20 +417,33 @@ class FollowAuthorAction(BaseAction):
             if current_text and message in current_text:
                 logger.info("私信输入框仍包含待发送文本，判定未发送")
                 return False
+            time.sleep(1.0)
+            if self._has_private_message_failure():
+                return False
             logger.info("未匹配到消息气泡，但输入框文本已清空，按已发送处理")
             return True
 
         return False
+
+    def _has_private_message_failure(self):
+        """识别抖音私信发送失败、隐私限制、风控提示。"""
+        try:
+            for node in self.d.xpath(L.PM_MESSAGE_TEXT_XPATH).all():
+                text = str(node.info.get('text', '') or node.info.get('contentDescription', '') or '')
+                if any(marker in text for marker in L.PM_SEND_FAILURE_TEXTS):
+                    logger.warning(f"检测到私信失败提示: {text}")
+                    return True
+            return False
+        except Exception as e:
+            logger.warning(f"检查私信失败提示时出错: {e}")
+            return False
     
     def _verify_message_sent(self, message):
         """验证消息是否成功发送（检查消息气泡是否出现）"""
         try:
-            # 方式1: 查找包含消息内容的TextView
-            message_xpath = f'{L.PM_MESSAGE_TEXT_XPATH}[@text="{message}"]'
-            if self.d.xpath(message_xpath).exists(timeout=2):
-                return True
+            if self._has_private_message_failure():
+                return False
             
-            # 方式2: 查找消息列表中的最后一条消息
             message_bubbles = self.d.xpath(L.PM_MESSAGE_TEXT_XPATH).all()
             if message_bubbles:
                 # 优先检查底部的消息（刚发送的消息通常在底部）
@@ -367,7 +452,9 @@ class FollowAuthorAction(BaseAction):
                     key=lambda x: x.info.get('bounds', {}).get('bottom', 0)
                 )[-3:]  # 取最后3条消息检查
                 for bubble in bottom_bubbles:
-                    text = bubble.info.get('text', '')
+                    text = str(bubble.info.get('text', '') or '')
+                    if any(marker in text for marker in L.PM_SEND_FAILURE_TEXTS):
+                        return False
                     if text and message in text:
                         return True
             

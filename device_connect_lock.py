@@ -9,7 +9,11 @@ LOCK_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".uiautomat
 
 
 @contextmanager
-def uiautomator2_connect_lock(timeout=30):
+def uiautomator2_connect_lock(timeout=120):
+    """
+    文件锁，确保同一时间只有一个进程/线程初始化 UIAutomator2 连接。
+    timeout 提高到 120 秒，避免多台设备同时初始化时排队超时。
+    """
     start = time.time()
     lock_file = open(LOCK_PATH, "a+b")
     locked = False

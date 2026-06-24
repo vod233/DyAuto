@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Keyboard android:keyWidth="20.000004%p" android:keyHeight="40.0dip" android:horizontalGap="5.0dip" android:verticalGap="5.0dip"
+  xmlns:android="http://schemas.android.com/apk/res/android">
+    <Row>
+        <Key android:keyWidth="25.0%p" android:codes="-7" android:keyEdgeFlags="left" android:keyIcon="@drawable/ic_random_24dp" />
+        <Key android:keyWidth="25.0%p" android:codes="-10" android:isRepeatable="true" android:keyLabel="Clear Text" />
+        <Key android:keyWidth="25.0%p" android:codes="-8" android:keyEdgeFlags="right" android:keyLabel="Enter" />
+        <Key android:keyWidth="25.0%p" android:codes="-5" android:keyEdgeFlags="right" android:keyLabel="Switch IME" />
+    </Row>
+</Keyboard>

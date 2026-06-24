@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView android:layout_width="fill_parent" android:layout_height="fill_parent"
+    android:background="@color/tech_primary"
+    xmlns:android="http://schemas.android.com/apk/res/android">
+    <LinearLayout android:orientation="vertical" android:layout_width="fill_parent" android:layout_height="wrap_content"
+        android:padding="12.0dip">
+
+        <LinearLayout android:orientation="vertical" android:layout_width="fill_parent" android:layout_height="wrap_content"
+            android:background="@drawable/tech_card_bg"
+            android:layout_marginBottom="12.0dip">
+            <LinearLayout android:orientation="horizontal" android:layout_width="fill_parent" android:layout_height="wrap_content"
+                android:background="@drawable/tech_section_title_bg"
+                android:paddingLeft="12.0dip"
+                android:paddingRight="12.0dip"
+                android:paddingTop="10.0dip"
+                android:paddingBottom="10.0dip">
+                <View android:layout_width="3.0dip" android:layout_height="18.0dip"
+                    android:background="@drawable/tech_accent_line"
+                    android:layout_marginRight="8.0dip"/>
+                <TextView android:textStyle="bold" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="服务状态"
+                    android:textColor="@color/tech_accent"
+                    android:textSize="16.0dip"/>
+            </LinearLayout>
+            <LinearLayout android:orientation="vertical" android:layout_width="fill_parent" android:layout_height="wrap_content"
+                android:paddingLeft="12.0dip"
+                android:paddingRight="12.0dip"
+                android:paddingTop="8.0dip"
+                android:paddingBottom="8.0dip">
+                <LinearLayout android:orientation="horizontal" android:layout_width="fill_parent" android:layout_height="wrap_content">
+                    <TextView android:textStyle="bold" android:id="@id/uiautomator_status" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/monitor_service_title" style="@style/LeftTitle" />
+                    <TextView android:id="@id/uiautomator_mode" android:layout_width="wrap_content" android:layout_height="wrap_content" style="@style/LeftTitle" />
+                </LinearLayout>
+                <LinearLayout android:orientation="horizontal" android:layout_width="fill_parent" android:layout_height="wrap_content">
+                    <TextView android:textStyle="bold" android:layout_width="0.0dip" android:text="@string/shot_cut" android:layout_weight="1.0" style="@style/LeftTitle" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout android:orientation="vertical" android:layout_width="fill_parent" android:layout_height="wrap_content"
+            android:background="@drawable/tech_card_bg"
+            android:layout_marginBottom="12.0dip">
+            <LinearLayout android:orientation="horizontal" android:layout_width="fill_parent" android:layout_height="wrap_content"
+                android:background="@drawable/tech_section_title_bg"
+                android:paddingLeft="12.0dip"
+                android:paddingRight="12.0dip"
+                android:paddingTop="10.0dip"
+                android:paddingBottom="10.0dip">
+                <View android:layout_width="3.0dip" android:layout_height="18.0dip"
+                    android:background="@drawable/tech_accent_line"
+                    android:layout_marginRight="8.0dip"/>
+                <TextView android:textStyle="bold" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="快捷操作"
+                    android:textColor="@color/tech_accent"
+                    android:textSize="16.0dip"/>
+            </LinearLayout>
+            <LinearLayout android:orientation="vertical" android:layout_width="fill_parent" android:layout_height="wrap_content"
+                android:paddingLeft="8.0dip"
+                android:paddingRight="8.0dip"
+                android:paddingTop="8.0dip"
+                android:paddingBottom="4.0dip">
+                <LinearLayout android:orientation="horizontal" android:layout_width="fill_parent" android:layout_height="wrap_content">
+                    <Button android:id="@id/development_settings" android:layout_width="0.0dip" android:text="@string/develop_mode" android:layout_weight="1.0" style="@style/SelectButton" />
+                    <Button android:id="@id/accessibility" android:layout_width="0.0dip" android:text="@string/barrier_free" android:layout_weight="1.0" style="@style/SelectButton" />
+                </LinearLayout>
+                <LinearLayout android:orientation="horizontal" android:layout_width="fill_parent" android:layout_height="wrap_content">
+                    <Button android:id="@id/btn_identify" android:layout_width="0.0dip" android:text="@string/identify" android:layout_weight="1.0" style="@style/SelectButton" />
+                    <Button android:id="@id/btn_finish" android:layout_width="0.0dip" android:text="@string/quit" android:layout_weight="1.0" style="@style/SelectButton" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="fill_parent" android:layout_height="wrap_content">
+                    <Button android:layout_width="0.0dip" android:layout_height="wrap_content" android:text="开启悬浮窗" android:layout_weight="1.0" android:onClick="showFloatWindow" style="@style/SelectButton" />
+                    <Button android:layout_width="0.0dip" android:layout_height="wrap_content" android:text="关闭悬浮窗" android:layout_weight="1.0" android:onClick="dismissFloatWindow" style="@style/SelectButton" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="fill_parent" android:layout_height="wrap_content">
+                    <Button android:layout_width="0.0dip" android:layout_height="wrap_content" android:text="忽略电池优化" android:layout_weight="1.0" android:onClick="requestIgnoreBatteryOptimizations" style="@style/SelectButton" />
+                    <Button android:layout_width="0.0dip" android:layout_height="wrap_content" android:text="Null" android:layout_weight="1.0" style="@style/SelectButton" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout android:orientation="vertical" android:layout_width="fill_parent" android:layout_height="wrap_content"
+            android:background="@drawable/tech_card_bg">
+            <LinearLayout android:orientation="horizontal" android:layout_width="fill_parent" android:layout_height="wrap_content"
+                android:background="@drawable/tech_section_title_bg"
+                android:paddingLeft="12.0dip"
+                android:paddingRight="12.0dip"
+                android:paddingTop="10.0dip"
+                android:paddingBottom="10.0dip">
+                <View android:layout_width="3.0dip" android:layout_height="18.0dip"
+                    android:background="@drawable/tech_accent_line"
+                    android:layout_marginRight="8.0dip"/>
+                <TextView android:textStyle="bold" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="系统信息"
+                    android:textColor="@color/tech_accent"
+                    android:textSize="16.0dip"/>
+            </LinearLayout>
+            <LinearLayout android:orientation="vertical" android:layout_width="fill_parent" android:layout_height="wrap_content"
+                android:paddingLeft="12.0dip"
+                android:paddingRight="12.0dip"
+                android:paddingTop="8.0dip"
+                android:paddingBottom="8.0dip">
+                <LinearLayout android:orientation="horizontal" android:layout_width="fill_parent" android:layout_height="wrap_content">
+                    <TextView android:textStyle="bold" android:layout_width="0.0dip" android:text="@string/avaible_internal_storage" android:layout_weight="1.0" style="@style/LeftTitle" />
+                    <TextView android:id="@id/in_storage" android:layout_width="0.0dip" android:layout_weight="1.0" style="@style/LeftTitle" />
+                </LinearLayout>
+                <LinearLayout android:orientation="horizontal" android:layout_width="fill_parent" android:layout_height="wrap_content">
+                    <TextView android:textStyle="bold" android:layout_width="0.0dip" android:text="本机IP地址:" android:layout_weight="1.0" style="@style/LeftTitle" />
+                    <TextView android:id="@id/ip_address" android:layout_width="0.0dip" android:layout_weight="1.0" style="@style/LeftTitle" />
+                </LinearLayout>
+                <LinearLayout android:orientation="horizontal" android:layout_width="fill_parent" android:layout_height="wrap_content">
+                    <TextView android:textStyle="bold" android:id="@id/app_version" android:layout_width="0.0dip" android:text="version: todo" android:layout_weight="1.0" style="@style/LeftTitle" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>
