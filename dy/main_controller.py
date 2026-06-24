@@ -99,7 +99,8 @@ class ScoutTaskRunner:
         self.app_mgr.wait_for_foreground()
         
         # 确保回到首页并处理可能弹出的青少年模式等弹窗
-        self.run_action(EnsureHomeAction)
+        if not self.run_action(EnsureHomeAction):
+            raise RuntimeError("抖音首页未就绪，无法继续执行任务")
         logger.info("抖音启动完成，准备就绪。")
 
     def shutdown(self):

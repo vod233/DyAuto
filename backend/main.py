@@ -5,7 +5,7 @@ import logging
 import concurrent.futures
 
 from dotenv import load_dotenv
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"), override=True)
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -263,6 +263,11 @@ def _load_douyin_config_for_frontend():
         "max_video_stay": data.get("crawler", {}).get("max_video_stay", 6),
         "max_comment_swipes": data.get("interaction", {}).get("max_comment_swipes", 2),
         "max_ai_comment_reviews": data.get("interaction", {}).get("max_ai_comment_reviews", 20),
+        "intent_keywords": ",".join(data.get("interaction", {}).get("intent_keywords", [])),
+        "min_followers_threshold": data.get("interaction", {}).get("min_followers_threshold", 0),
+        "enable_private_message": data.get("interaction", {}).get("enable_private_message", True),
+        "pm_followers_threshold": data.get("interaction", {}).get("pm_followers_threshold", 1),
+        "pm_message_list": data.get("interaction", {}).get("pm_message_list", []),
         "ai_enabled": data.get("ai_reply", {}).get("enabled", True),
         "ai_base_url": data.get("ai_reply", {}).get("base_url", "https://api.deepseek.com/v1"),
         "ai_api_key": data.get("ai_reply", {}).get("api_key", ""),
@@ -292,6 +297,11 @@ def _save_douyin_config(config: AppConfig):
         "interaction": {
             "max_comment_swipes": config.max_comment_swipes,
             "max_ai_comment_reviews": config.max_ai_comment_reviews,
+            "intent_keywords": config.intent_keywords,
+            "min_followers_threshold": config.min_followers_threshold,
+            "enable_private_message": config.enable_private_message,
+            "pm_followers_threshold": config.pm_followers_threshold,
+            "pm_message_list": config.pm_message_list,
         }
     }
     api_yaml_data = {

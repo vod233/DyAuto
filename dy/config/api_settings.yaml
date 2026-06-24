@@ -1,35 +1,7 @@
 ai_reply:
   enabled: true
   base_url: https://api.deepseek.com/v1
-  model: deepseek-chat
   api_key: ''
+  model: deepseek-v4-flash
   temperature: 0.7
   max_tokens: 120
-  timeout: 60
-
-search:
-  keywords:
-    - AI获客
-    - 短视频运营
-  sort_by: latest
-
-crawler:
-  max_daily_videos: 100
-  max_videos_per_keyword: 5
-  min_video_stay: 3
-  max_video_stay: 6
-
-interaction:
-  max_comment_swipes: 2
-  max_ai_comment_reviews: 20
-  min_followers_threshold: 0  # 最小粉丝数阈值（单位：万），0表示不限制
-  
-  # 私信功能配置
-  enable_private_message: true   # 是否启用私信功能
-  pm_followers_threshold: 1      # 发送私信的粉丝数阈值（单位：万），粉丝数大于1万(10000)才发送私信
-  pm_message_list:               # 私信话术词库（随机选取一条发送）
-    - "您好，关注您很久了，想向您学习交流一下！"
-    - "看了您的视频很有收获，方便交流一下吗？"
-    - "您好，想跟您请教一些问题，可以加个联系方式吗？"
-    - "关注您的内容很久了，想深入交流学习！"
-    - "您的内容很有价值，希望能有机会合作交流！"

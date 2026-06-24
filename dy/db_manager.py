@@ -42,6 +42,7 @@ class DBManager:
                         liked INTEGER DEFAULT 0,
                         commented INTEGER DEFAULT 0,
                         followed INTEGER DEFAULT 0,
+                        private_messaged INTEGER DEFAULT 0,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
@@ -65,6 +66,8 @@ class DBManager:
             cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN note_title TEXT DEFAULT ''")
         if "ai_reply" not in existing_columns:
             cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN ai_reply TEXT DEFAULT ''")
+        if "private_messaged" not in existing_columns:
+            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN private_messaged INTEGER DEFAULT 0")
 
     def _ensure_table(self):
         """确保执行操作前当天的表存在（应对跨天运行的情况）"""
@@ -117,9 +120,9 @@ class DBManager:
     def update_interaction(self, video_id, action_type):
         """
         更新视频的互动状态
-        :param action_type: 'like', 'comment', 'follow'
+        :param action_type: 'like', 'comment', 'follow', 'private_message'
         """
-        if action_type not in ('like', 'comment', 'follow'):
+        if action_type not in ('like', 'comment', 'follow', 'private_message'):
             logger.warning(f"未知的互动类型: {action_type}")
             return False
             
@@ -127,7 +130,8 @@ class DBManager:
         field_map = {
             'like': 'liked',
             'comment': 'commented',
-            'follow': 'followed'
+            'follow': 'followed',
+            'private_message': 'private_messaged',
         }
         field_name = field_map[action_type]
         
@@ -156,7 +160,8 @@ class DBManager:
                         COUNT(*) as total_videos,
                         SUM(liked) as total_likes,
                         SUM(commented) as total_comments,
-                        SUM(followed) as total_follows
+                        SUM(followed) as total_follows,
+                        SUM(private_messaged) as total_private_messages
                     FROM {table_name}
                 ''')
                 row = cursor.fetchone()
@@ -164,11 +169,12 @@ class DBManager:
                     "videos": row[0] or 0,
                     "likes": row[1] or 0,
                     "comments": row[2] or 0,
-                    "follows": row[3] or 0
+                    "follows": row[3] or 0,
+                    "private_messages": row[4] or 0
                 }
         except Exception as e:
             logger.error(f"获取当天统计数据失败: {e}")
-            return {"videos": 0, "likes": 0, "comments": 0, "follows": 0}
+            return {"videos": 0, "likes": 0, "comments": 0, "follows": 0, "private_messages": 0}
 
     def get_daily_records(self, limit=100):
         """获取当天的详细操作记录，按时间倒序排列"""
@@ -178,7 +184,7 @@ class DBManager:
                 cursor = conn.cursor()
                 cursor.execute(f'''
                     SELECT 
-                        video_id, keyword, note_title, ai_reply, url, liked, commented, followed, created_at 
+                        video_id, keyword, note_title, ai_reply, url, liked, commented, followed, private_messaged, created_at 
                     FROM {table_name}
                     ORDER BY created_at DESC
                     LIMIT ?
@@ -195,7 +201,8 @@ class DBManager:
                         "liked": bool(row[5]),
                         "commented": bool(row[6]),
                         "followed": bool(row[7]),
-                        "created_at": row[8]
+                        "private_messaged": bool(row[8]),
+                        "created_at": row[9]
                     })
                 return records
         except Exception as e:

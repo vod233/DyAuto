@@ -310,6 +310,17 @@ def render_douyin_page():
                         help="控制评论区翻页深度，和识别条数上限共同生效"
                     )
                     st.caption("系统会用 AI 判断评论是否有咨询、求推荐、想了解、求教程等意愿。命中后自动生成楼中楼回复，引导对方查看主页。")
+                    
+                    # 自定义意向关键词
+                    st.markdown("---")
+                    st.subheader("🔍 自定义意向关键词")
+                    intent_keywords = st.text_input(
+                        "额外意向触发词（逗号分隔）",
+                        value=current_config.get("intent_keywords", ""),
+                        placeholder="产品, 求购, 咨询, 价格, 怎么买",
+                        help="当评论中包含这些词时，AI 会判定为意向客户并主动回复"
+                    )
+                    st.caption("💡 示例：输入「产品」后，评论区出现「这里想要什么产品」就会被识别为意向客户")
 
             with col3:
                 with st.container(border=True, height=700):
@@ -351,6 +362,47 @@ def render_douyin_page():
                     st.caption("同一套 AI 配置用于标题评论、评论区意向识别和楼中楼回复。")
 
             st.markdown("---")
+            with st.container(border=True):
+                st.subheader("📧 作者私信策略")
+                pm_messages_str = st.text_area(
+                    "私信话术输入框（每行一条，可自由增删）",
+                    value="\n".join(current_config.get("pm_message_list", [])),
+                    height=220,
+                    help="任务执行时会从这里的非空行中随机抽取一条，作为私信内容发送。"
+                )
+
+                pm_messages_list = [m.strip() for m in pm_messages_str.split("\n") if m.strip()]
+                if pm_messages_list:
+                    st.caption(f"当前共 {len(pm_messages_list)} 条私信话术，执行时随机抽取其中一行。")
+                else:
+                    st.caption("提示：请至少填写一条私信话术，否则私信功能会自动跳过。")
+
+                pm_col1, pm_col2, pm_col3 = st.columns(3)
+                with pm_col1:
+                    min_followers = st.number_input(
+                        "最小关注粉丝阈值（万）",
+                        value=float(current_config.get("min_followers_threshold", 0)),
+                        min_value=0.0,
+                        max_value=1000.0,
+                        step=0.1,
+                        help="作者粉丝数低于该值时跳过关注，0 表示不限制"
+                    )
+                with pm_col2:
+                    enable_pm = st.toggle(
+                        "启用作者私信",
+                        value=bool(current_config.get("enable_private_message", True)),
+                        help="仅在进入作者主页后，且粉丝数超过私信阈值时尝试发送"
+                    )
+                with pm_col3:
+                    pm_threshold = st.number_input(
+                        "私信粉丝阈值（万）",
+                        value=float(current_config.get("pm_followers_threshold", 1)),
+                        min_value=0.0,
+                        max_value=1000.0,
+                        step=0.1
+                    )
+
+            st.markdown("---")
             submitted = st.form_submit_button("💾 保存当前配置", type="primary", use_container_width=True)
 
             if submitted:
@@ -367,6 +419,11 @@ def render_douyin_page():
                     "max_video_stay": max_stay,
                     "max_comment_swipes": max_swipes,
                     "max_ai_comment_reviews": max_ai_reviews,
+                    "intent_keywords": [k.strip() for k in intent_keywords.split(",") if k.strip()],
+                    "min_followers_threshold": min_followers,
+                    "enable_private_message": enable_pm,
+                    "pm_followers_threshold": pm_threshold,
+                    "pm_message_list": [m.strip() for m in pm_messages_str.split("\n") if m.strip()],
                     "ai_enabled": ai_enabled,
                     "ai_base_url": ai_base_url.strip(),
                     "ai_api_key": ai_api_key.strip(),

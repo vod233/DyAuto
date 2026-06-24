@@ -9,12 +9,12 @@ class EnsureHomeAction(BaseAction):
     """确保抖音已打开并处于可以搜索的状态 (包含处理青少年模式弹窗)"""
     def execute(self):
         for i in range(10):
-            if self.d(text=L.HOME_TAB_TEXT).exists or self.d.xpath(L.SEARCH_BTN_DESC).exists:
+            if self.d(text=L.HOME_TAB_TEXT).exists(timeout=0.5) or self.d.xpath(L.SEARCH_BTN_DESC).exists:
                 logger.info("✅ 抖音首页加载成功")
                 time.sleep(3)
                 return True
             
-            if self.d(text=L.YOUTH_MODE_CLOSE_TEXT).exists:
+            if self.d(text=L.YOUTH_MODE_CLOSE_TEXT).exists(timeout=0.5):
                 self.d(text=L.YOUTH_MODE_CLOSE_TEXT).click()
                 logger.info("已跳过青少年模式弹窗")
                 
@@ -82,9 +82,10 @@ class EnterSearchAction(BaseAction):
             video_tab.click()
             logger.info("成功切换到'视频'页签")
             time.sleep(2)
+            return True
         else:
             logger.warning("未找到'视频'页签按钮")
-        return True
+            return False
 
 class ApplyFiltersAction(BaseAction):
     """打开并应用搜索结果的筛选条件"""
@@ -93,7 +94,7 @@ class ApplyFiltersAction(BaseAction):
         logger.info(f">>> 自动化配对成功：模式[{sort_mode}] -> 点击按钮[{sort_text}] <<<")
         
         filter_btn = self.d.xpath(L.FILTER_PANEL_BTN)
-        if filter_btn.exists:
+        if filter_btn.wait(timeout=4):
             bounds = filter_btn.info['bounds']
             cx = (bounds['left'] + bounds['right']) / 2
             cy = (bounds['top'] + bounds['bottom']) / 2
@@ -118,7 +119,7 @@ class ApplyFiltersAction(BaseAction):
             time.sleep(1.0)
             
             video_tab = self.d.xpath(L.VIDEO_TAB)
-            if video_tab.exists:
+            if video_tab.wait(timeout=2):
                 video_tab.click()
                 logger.info("已点击'视频'页签辅助收起面板")
             
@@ -147,13 +148,16 @@ class EnterFirstVideoAction(BaseAction):
                 text = node.text
                 if text and (len(text) > 10 or "#" in text):
                     logger.info(f"识别到视频文案: {text[:20]}...")
-                    self.d.xpath(f'//android.widget.TextView[@text="{text}"]').click()
+                    node.click()
+                    time.sleep(2)
                     return True
             time.sleep(1)
                 
         logger.warning("未找到特征文案，尝试点击默认视频位置")
-        self.d.click(0.3, 0.4)
-        return True
+        w, h = self.d.window_size()
+        self.d.click(int(w * 0.3), int(h * 0.4))
+        time.sleep(2)
+        return len(self.d.xpath(L.SHARE_BTN_DYNAMIC).all()) > 0 or len(self.d.xpath(L.COMMENT_BTN_DYNAMIC).all()) > 0
 
 class SwipeNextVideoAction(BaseAction):
     """全屏模式下向下滑动到下一个视频"""

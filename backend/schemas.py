@@ -22,6 +22,11 @@ class AppConfig(BaseModel):
     max_video_stay: int = 6
     max_comment_swipes: int = 2
     max_ai_comment_reviews: int = 20
+    intent_keywords: List[str] = []
+    min_followers_threshold: float = 0
+    enable_private_message: bool = True
+    pm_followers_threshold: float = 1
+    pm_message_list: List[str] = []
 
 class DeviceConnectRequest(BaseModel):
     """连接新设备请求"""

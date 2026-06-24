@@ -8,6 +8,56 @@ from .locators import TikTokLocators as L
 
 logger = logging.getLogger(__name__)
 
+
+def _node_bounds(node):
+    return node.info.get('bounds', {}) or {}
+
+
+def _bounds_bottom(node):
+    return _node_bounds(node).get('bottom', 0)
+
+
+def _bounds_center(bounds):
+    return (
+        int((bounds.get('left', 0) + bounds.get('right', 0)) / 2),
+        int((bounds.get('top', 0) + bounds.get('bottom', 0)) / 2),
+    )
+
+
+def _is_visible_enabled(node):
+    info = node.info
+    return info.get('visible', True) and info.get('enabled', True)
+
+
+def _set_text_to_input(d, input_node, text):
+    input_node.click()
+    time.sleep(0.2)
+    resource_id = input_node.info.get('resourceId') or input_node.info.get('resourceName')
+    if resource_id:
+        try:
+            input_selector = d(resourceId=resource_id)
+            if input_selector.exists(timeout=0.5):
+                input_selector.set_text(text)
+                return True
+        except Exception as e:
+            logger.info(f"resource-id 输入失败，改用 fastinput: {e}")
+
+    try:
+        d.set_fastinput_ime(True)
+        try:
+            d.clear_text()
+        except Exception:
+            for _ in range(30):
+                d.press("del")
+        d.send_keys(text)
+        return True
+    finally:
+        try:
+            d.set_fastinput_ime(False)
+        except Exception:
+            pass
+
+
 class DoubleClickLikeAction(BaseAction):
     """双击屏幕中心区域点赞"""
     def execute(self):
@@ -41,6 +91,7 @@ class FollowAuthorAction(BaseAction):
         # 3. 根据阈值判断是否关注
         min_followers = self._get_min_followers_threshold()
         should_follow = True
+        followed = False
         if min_followers > 0 and follower_count is not None:
             if follower_count < min_followers:
                 logger.info(f"作者粉丝数({follower_count})低于关注阈值({min_followers})，跳过关注")
@@ -52,17 +103,24 @@ class FollowAuthorAction(BaseAction):
             if follow_btn.exists(timeout=2):
                 follow_btn.click()
                 logger.info("成功点击关注")
+                followed = True
                 time.sleep(1.5)
             else:
                 logger.info("未找到'关注'按钮，可能已经关注过了")
         
         # 5. 判断是否发送私信（仅当成功关注且粉丝数大于私信阈值时）
+        private_message_sent = False
         if should_follow:
-            self._try_send_private_message(follower_count)
+            private_message_sent = self._try_send_private_message(follower_count)
         
         # 6. 返回视频页
         self._return_to_video_page()
-        return should_follow
+        return {
+            "should_follow": should_follow,
+            "followed": followed,
+            "private_message_sent": private_message_sent,
+            "follower_count": follower_count,
+        }
     
     def _get_min_followers_threshold(self):
         """获取配置的最小粉丝数阈值（单位：万）"""
@@ -72,19 +130,19 @@ class FollowAuthorAction(BaseAction):
         """尝试发送私信（仅当粉丝数大于私信阈值时）"""
         # 检查私信功能是否启用
         if not self.config.get('interaction', {}).get('enable_private_message', False):
-            return
+            return False
         
         # 检查粉丝数是否达到私信阈值
         pm_threshold = float(self.config.get('interaction', {}).get('pm_followers_threshold', 10))
         if follower_count is None or follower_count <= pm_threshold:
             logger.info(f"作者粉丝数({follower_count})未达到私信阈值({pm_threshold})，跳过私信")
-            return
+            return False
         
         # 获取私信话术列表
         message_list = self.config.get('interaction', {}).get('pm_message_list', [])
         if not message_list:
             logger.warning("私信话术词库为空，无法发送私信")
-            return
+            return False
         
         # 随机选择一条话术
         message = random.choice(message_list)
@@ -92,39 +150,42 @@ class FollowAuthorAction(BaseAction):
         
         # 执行私信发送
         try:
-            self._send_private_message(message)
+            return self._send_private_message(message)
         except Exception as e:
             logger.error(f"发送私信失败: {e}")
+            return False
     
     def _send_private_message(self, message):
         """执行发送私信操作"""
+        w, h = self.d.window_size()
+        
         # 1. 查找私信按钮（消息/私信图标）
         message_btn = None
         
-        # 方式1: 通过 content-desc 查找
-        message_nodes = self.d.xpath('//*[contains(@content-desc, "私信") or contains(@content-desc, "消息")]').all()
+        # 方式1: 通过 content-desc 查找私信按钮（使用定位器配置）
+        message_nodes = self.d.xpath(L.PM_BTN_DESC).all()
         if message_nodes:
             message_btn = message_nodes[0]
             logger.info("通过 content-desc 找到私信按钮")
         
-        # 方式2: 通过文本查找
+        # 方式2: 通过文本查找私信按钮（使用定位器配置）
         if not message_btn:
-            message_text_nodes = self.d(text="私信").all()
+            message_text_nodes = self.d.xpath(f'//*[@text="{L.PM_BTN_TEXT}"]').all()
             if message_text_nodes:
-                message_btn = message_text_nodes[0]
+                # 优先选择可点击的私信按钮
+                clickable_btns = [btn for btn in message_text_nodes if btn.info.get('clickable', False)]
+                message_btn = clickable_btns[0] if clickable_btns else message_text_nodes[0]
                 logger.info("通过文本找到私信按钮")
         
-        # 方式3: 通过常见位置坐标点击
+        # 方式3: 通过常见位置坐标点击（作者主页私信按钮通常在头像附近）
         if not message_btn:
-            w, h = self.d.window_size()
-            # 尝试点击页面常见的私信按钮位置（通常在头像下方或页面底部）
             logger.info("未找到私信按钮，尝试常见位置")
-            # 尝试点击头像下方区域
+            # 尝试点击头像下方区域（作者主页常见位置）
             self.d.click(int(w * 0.5), int(h * 0.35))
             time.sleep(2)
             
             # 再次查找私信输入框
-            input_nodes = self.d(className="android.widget.EditText").all()
+            input_nodes = self.d.xpath(f'//{L.PM_EDIT_TEXT_CLASS}').all()
             if input_nodes:
                 message_btn = input_nodes[0]
                 logger.info("找到输入框")
@@ -137,24 +198,184 @@ class FollowAuthorAction(BaseAction):
                 logger.warning("点击私信按钮失败，尝试直接查找输入框")
         
         # 2. 查找输入框并输入消息
-        input_edit = self.d(className="android.widget.EditText")
-        if input_edit.exists(timeout=3):
-            input_edit.set_text(message)
-            time.sleep(1)
-            
-            # 3. 查找发送按钮
-            send_btn = self.d.xpath('//*[@text="发送" or @content-desc="发送"]')
-            if send_btn.exists(timeout=2):
-                send_btn.click()
-                logger.info("私信发送成功")
-                time.sleep(2)
-            else:
-                # 尝试回车键发送
-                self.d.press("enter")
-                logger.info("通过回车键发送私信")
-                time.sleep(2)
+        input_edit = self._find_private_message_input(timeout=4)
+        
+        if input_edit:
+            if not _set_text_to_input(self.d, input_edit, message):
+                logger.warning("私信输入失败，无法发送私信")
+                return False
+            time.sleep(1.5)
+
+            if self._send_private_message_from_input(input_edit, message):
+                logger.info("私信发送成功并已验证")
+                return True
+
+            logger.warning("私信发送失败：文本仍停留在输入框，未继续重试以避免堆积草稿")
+            return False
         else:
             logger.warning("未找到私信输入框，无法发送私信")
+            return False
+
+    def _find_private_message_input(self, timeout=3):
+        """查找聊天页底部可编辑输入框。"""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            input_nodes = self.d.xpath(f'//{L.PM_EDIT_TEXT_CLASS}').all()
+            candidates = [node for node in input_nodes if _is_visible_enabled(node)]
+            if candidates:
+                return sorted(candidates, key=_bounds_bottom)[-1]
+            time.sleep(0.3)
+        return None
+
+    def _find_private_message_send_button(self, input_edit=None):
+        """查找私信页发送按钮，兼容文字、resource-id 和图标按钮。"""
+        for resource_id in L.PM_SEND_BTN_IDS:
+            btn = self.d(resourceId=resource_id)
+            if btn.exists(timeout=0.3) and _is_visible_enabled(btn):
+                logger.info(f"通过 resource-id 找到私信发送按钮: {resource_id}")
+                return btn
+
+        send_xpaths = (
+            L.PM_SEND_BTN_XPATH,
+        )
+        for xpath in send_xpaths:
+            nodes = self.d.xpath(xpath).all()
+            candidates = [node for node in nodes if _is_visible_enabled(node)]
+            if candidates:
+                logger.info("通过文本/content-desc 找到私信发送按钮")
+                return sorted(candidates, key=_bounds_bottom)[-1]
+
+        if not input_edit:
+            return None
+
+        input_bounds = _node_bounds(input_edit)
+        if not input_bounds:
+            return None
+
+        input_center_y = int((input_bounds.get('top', 0) + input_bounds.get('bottom', 0)) / 2)
+        right_of_input = input_bounds.get('right', 0)
+        width, _ = self.d.window_size()
+        clickable_nodes = self.d.xpath(L.PM_CLICKABLE_XPATH).all()
+        nearby = []
+        for node in clickable_nodes:
+            if not _is_visible_enabled(node):
+                continue
+            bounds = _node_bounds(node)
+            if not bounds:
+                continue
+            overlaps_input_row = bounds.get('top', 0) <= input_center_y <= bounds.get('bottom', 0)
+            is_on_right = bounds.get('left', 0) >= max(right_of_input - 12, int(width * 0.55))
+            if overlaps_input_row and is_on_right:
+                nearby.append(node)
+
+        if nearby:
+            logger.info("通过输入框右侧可点击节点找到私信发送按钮")
+            return sorted(nearby, key=lambda n: _node_bounds(n).get('left', 0))[-1]
+
+        return None
+
+    def _click_node(self, node):
+        try:
+            node.click()
+            return True
+        except Exception:
+            bounds = _node_bounds(node)
+            if not bounds:
+                return False
+            x, y = _bounds_center(bounds)
+            self.d.click(x, y)
+            return True
+
+    def _click_send_area_next_to_input(self, input_edit):
+        """图标按钮无法被 UIAutomator 识别时，点击输入框同行最右侧区域。"""
+        bounds = _node_bounds(input_edit)
+        if not bounds:
+            return False
+        width, _ = self.d.window_size()
+        y = int((bounds.get('top', 0) + bounds.get('bottom', 0)) / 2)
+        x = min(int(width * 0.94), max(bounds.get('right', 0) + 36, int(width * 0.88)))
+        logger.info(f"尝试点击输入框右侧发送区域: ({x}, {y})")
+        self.d.click(x, y)
+        return True
+
+    def _click_private_send_button(self, input_edit):
+        send_btn = self._find_private_message_send_button(input_edit)
+        if not send_btn:
+            return False
+        return self._click_node(send_btn)
+
+    def _send_ime_action(self):
+        try:
+            self.d.send_action("send")
+        except Exception:
+            self.d.send_action("done")
+        return True
+
+    def _send_private_message_from_input(self, input_edit, message):
+        """从已输入文本的私信输入框执行发送，并验证输入框被清空。"""
+        send_attempts = [
+            ("send_button", lambda: self._click_private_send_button(input_edit)),
+            ("right_side_coordinate", lambda: self._click_send_area_next_to_input(input_edit)),
+            ("ime_send_action", self._send_ime_action),
+            ("enter_key", lambda: self.d.press("enter") or True),
+        ]
+
+        for name, action in send_attempts:
+            try:
+                logger.info(f"尝试私信发送方式: {name}")
+                if action() is False:
+                    continue
+                time.sleep(1.8)
+                if self._verify_private_message_sent(message):
+                    logger.info(f"私信发送方式成功: {name}")
+                    return True
+            except Exception as e:
+                logger.warning(f"私信发送方式失败 ({name}): {e}")
+
+        return False
+
+    def _verify_private_message_sent(self, message):
+        """确认消息已发送；先查消息气泡，再用输入框状态兜底。"""
+        if self._verify_message_sent(message):
+            return True
+
+        input_edit = self._find_private_message_input(timeout=1.2)
+        if input_edit:
+            current_text = str(input_edit.info.get('text', '') or '').strip()
+            if current_text and message in current_text:
+                logger.info("私信输入框仍包含待发送文本，判定未发送")
+                return False
+            logger.info("未匹配到消息气泡，但输入框文本已清空，按已发送处理")
+            return True
+
+        return False
+    
+    def _verify_message_sent(self, message):
+        """验证消息是否成功发送（检查消息气泡是否出现）"""
+        try:
+            # 方式1: 查找包含消息内容的TextView
+            message_xpath = f'{L.PM_MESSAGE_TEXT_XPATH}[@text="{message}"]'
+            if self.d.xpath(message_xpath).exists(timeout=2):
+                return True
+            
+            # 方式2: 查找消息列表中的最后一条消息
+            message_bubbles = self.d.xpath(L.PM_MESSAGE_TEXT_XPATH).all()
+            if message_bubbles:
+                # 优先检查底部的消息（刚发送的消息通常在底部）
+                bottom_bubbles = sorted(
+                    message_bubbles,
+                    key=lambda x: x.info.get('bounds', {}).get('bottom', 0)
+                )[-3:]  # 取最后3条消息检查
+                for bubble in bottom_bubbles:
+                    text = bubble.info.get('text', '')
+                    if text and message in text:
+                        return True
+            
+            logger.debug("未找到已发送的消息气泡")
+            return False
+        except Exception as e:
+            logger.warning(f"验证消息发送失败: {e}")
+            return False
     
     def _extract_follower_count(self):
         """从作者主页提取粉丝数量（单位：万）"""

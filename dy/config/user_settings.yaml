@@ -1,12 +1,14 @@
 search:
   keywords:
-  - codex
+  - 电脑技术
+  - 豆包
+  - deepseek
   sort_by: latest
 crawler:
   max_daily_videos: 100
-  max_videos_per_keyword: 5
-  min_video_stay: 3
-  max_video_stay: 6
+  max_videos_per_keyword: 2
+  min_video_stay: 1
+  max_video_stay: 3
 comments: []
 target:
   keywords: []
@@ -14,3 +16,10 @@ target:
 interaction:
   max_comment_swipes: 2
   max_ai_comment_reviews: 20
+  min_followers_threshold: 0.0
+  enable_private_message: true
+  pm_followers_threshold: 0.01
+  pm_message_list:
+  - 你好，看到你的内容很有启发，主页有些资料可以参考
+  - 刚好整理过相关内容，可以看看我的主页
+  - 这个方向我也在做，主页有一些整理

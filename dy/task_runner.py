@@ -127,12 +127,16 @@ class TikTokTaskFlow:
         
         # 1. 搜索
         self._check_stop()
-        self.runner.run_action(EnterSearchAction, keyword)
+        if not self.runner.run_action(EnterSearchAction, keyword):
+            logger.warning(f"关键词 '{keyword}' 搜索失败，跳过当前关键词")
+            self.runner.run_action(ResetToSearchAction)
+            return
         
         # 2. 筛选
         self._check_stop()
         sort_mode = self.config.get('search', {}).get('sort_by', 'latest')
-        self.runner.run_action(ApplyFiltersAction, sort_mode=sort_mode)
+        if not self.runner.run_action(ApplyFiltersAction, sort_mode=sort_mode):
+            logger.warning("筛选未成功应用，继续使用当前搜索结果")
         
         # 3. 进入第一个视频
         self._check_stop()
@@ -213,7 +217,13 @@ class TikTokTaskFlow:
                     
                     # B.2 关注
                     self._check_stop()
-                    if self.runner.run_action(FollowAuthorAction):
+                    follow_result = self.runner.run_action(FollowAuthorAction)
+                    if isinstance(follow_result, dict):
+                        if follow_result.get("followed"):
+                            self.db.update_interaction(video_id, "follow")
+                        if follow_result.get("private_message_sent"):
+                            self.db.update_interaction(video_id, "private_message")
+                    elif follow_result:
                         self.db.update_interaction(video_id, "follow")
                     self._interruptible_sleep(1.5)
                     

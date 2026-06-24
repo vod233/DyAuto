@@ -59,6 +59,31 @@ class TikTokLocators:
     # 7. 评论发送 (Post Comment)
     # ==========================================
     COMMENT_EDIT_TEXT_CLASS = "android.widget.EditText"
+    COMMENT_EDIT_TEXT_XPATH = "//android.widget.EditText"
     COMMENT_SEND_BTN_ID = "com.ss.android.ugc.aweme:id/ero"
+    COMMENT_SEND_BTN_IDS = (
+        "com.ss.android.ugc.aweme:id/ero",
+        "com.ss.android.ugc.aweme:id/btn_send",
+        "com.ss.android.ugc.aweme:id/jc=",
+        "com.ss.android.ugc.aweme:id/d_3",
+        "com.ss.android.ugc.aweme:id/d_4",
+    )
     COMMENT_SEND_BTN_TEXT = "发送"
-    COMMENT_SEND_BTN_XPATH = '//*[@text="发送" or @content-desc="发送"]'
+    COMMENT_SEND_BTN_XPATH = '//*[@text="发送" or @content-desc="发送" or contains(@content-desc, "发送")]'
+    COMMENT_TEXT_XPATH = "//android.widget.TextView"
+    
+    # ==========================================
+    # 8. 私信功能 (Private Message)
+    # ==========================================
+    PM_BTN_DESC = '//*[contains(@content-desc, "私信")]'
+    PM_BTN_TEXT = "私信"
+    PM_EDIT_TEXT_CLASS = "android.widget.EditText"
+    PM_SEND_BTN_IDS = (
+        "com.ss.android.ugc.aweme:id/btn_send",
+        "com.ss.android.ugc.aweme:id/ero",
+        "com.ss.android.ugc.aweme:id/jc=",
+    )
+    PM_SEND_BTN_ID = PM_SEND_BTN_IDS[0]
+    PM_SEND_BTN_XPATH = '//*[@text="发送" or @content-desc="发送" or contains(@content-desc, "发送")]'
+    PM_CLICKABLE_XPATH = '//*[@clickable="true"]'
+    PM_MESSAGE_TEXT_XPATH = "//android.widget.TextView"

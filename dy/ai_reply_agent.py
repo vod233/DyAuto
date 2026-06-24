@@ -3,6 +3,10 @@ import os
 import re
 from typing import Optional
 
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"), override=True)
+
 logger = logging.getLogger(__name__)
 LANGCHAIN_IMPORT_ERROR = None
 
@@ -62,19 +66,24 @@ class DYReplyAgent:
         logger.warning("未能生成可用回复，跳过评论环节。")
         return None
 
-    def is_intent_comment(self, comment_text: str, video_title: str = "", keyword: str = "") -> bool:
+    def is_intent_comment(self, comment_text: str, video_title: str = "", keyword: str = "", custom_keywords: list = None) -> bool:
         clean_comment = self._normalize_text(comment_text)
         if not clean_comment or len(clean_comment) < 3:
             return False
 
+        custom_keywords = custom_keywords or []
+        
         if not self.is_enabled():
-            return self._local_intent_guess(clean_comment)
+            return self._local_intent_guess(clean_comment, custom_keywords)
 
         result = self._call_intent_model(clean_comment, video_title, keyword)
         if result is None:
-            return self._local_intent_guess(clean_comment)
+            return self._local_intent_guess(clean_comment, custom_keywords)
 
-        return result
+        if result:
+            return True
+        
+        return self._check_custom_keywords(clean_comment, custom_keywords)
 
     def generate_lead_reply(self, comment_text: str, video_title: str = "", keyword: str = "") -> Optional[str]:
         clean_comment = self._normalize_text(comment_text)
@@ -317,8 +326,28 @@ class DYReplyAgent:
         ]
         return not any(pattern.search(text) for pattern in banned_patterns)
 
-    def _local_intent_guess(self, text: str) -> bool:
-        return bool(re.search(r"(怎么买|哪里|求|想要|了解|价格|多少|推荐|教程|方法|链接|资料|怎么做|靠谱吗|有用吗)", text))
+    def _local_intent_guess(self, text: str, custom_keywords: list = None) -> bool:
+        custom_keywords = custom_keywords or []
+        
+        default_pattern = r"(怎么买|哪里|求|想要|了解|价格|多少|推荐|教程|方法|链接|资料|怎么做|靠谱吗|有用吗)"
+        if re.search(default_pattern, text):
+            return True
+        
+        return self._check_custom_keywords(text, custom_keywords)
+    
+    def _check_custom_keywords(self, text: str, custom_keywords: list) -> bool:
+        if not custom_keywords:
+            return False
+        
+        # 先清洗再去重，避免 " 关键词" 和 "关键词" 被当成两条。
+        unique_keywords = list(dict.fromkeys(k.strip() for k in custom_keywords if str(k).strip()))
+        
+        for keyword in unique_keywords:
+            if keyword in text:
+                logger.info(f"🔍 命中自定义意向关键词: '{keyword}'")
+                return True
+        
+        return False
 
     def _build_lead_fallback(self, comment_text: str) -> str:
         if re.search(r"(哪里|怎么买|价格|多少|链接)", comment_text):
@@ -338,7 +367,7 @@ class DYReplyAgent:
             return "这条分享很有氛围感，信息也挺实用"
         if re.search(r"(健身|减脂|跑步|饮食|运动)", title):
             return "内容很清晰，照着做会更容易坚持"
-        return ""
+        return "内容讲得挺清楚，确实有参考价值"
 
     def _normalize_text(self, text: Optional[str]) -> str:
         if not text:
