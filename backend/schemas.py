@@ -9,11 +9,13 @@ class AppConfig(BaseModel):
     max_daily_videos: int = 100
     # 小红书专属
     ai_enabled: bool = True
-    ai_base_url: str = "https://api.deepseek.com/v1"
+    ai_base_url: str = "https://lcjx.yun/social-ai-credit-api"
     ai_api_key: str = ""
     ai_model: str = "deepseek-v4-flash"
     ai_temperature: float = 0.7
     ai_max_tokens: int = 120
+    license_key: str = ""
+    license_server_url: str = "https://lcjx.yun/social-ai-credit-api"
     # 抖音专属
     comments: List[str] = []
     target_keywords: List[str] = []
@@ -23,6 +25,10 @@ class AppConfig(BaseModel):
     max_comment_swipes: int = 2
     max_ai_comment_reviews: int = 20
     intent_keywords: List[str] = []
+    enable_like: bool = True
+    enable_author_follow: bool = True
+    enable_video_comment: bool = True
+    enable_comment_lead: bool = True
     min_followers_threshold: float = 0
     enable_private_message: bool = True
     pm_followers_threshold: float = 1
@@ -41,6 +47,12 @@ class TaskStartRequest(BaseModel):
     """启动任务时的请求参数"""
     devices: List[str]  # 用户勾选的要执行任务的设备序列号列表
     platform: str = "xhs"  # 目标平台: "xhs" 或 "douyin"
+
+class LicenseVerifyRequest(BaseModel):
+    """授权码验证请求"""
+    license_key: str = ""
+    license_server_url: str = "https://lcjx.yun/social-ai-credit-api"
+    device_id: str = ""
 
 class TaskResponse(BaseModel):
     """通用的响应格式"""

@@ -31,7 +31,7 @@
     <string name="adb_keyboard_label">AdbKeyboard</string>
     <string name="agent_die">:agent is die</string>
     <string name="agent_live">:agent is live</string>
-    <string name="app_name">ATX</string>
+    <string name="app_name">聚兴助手</string>
     <string name="atx_agent">ATX-Agent</string>
     <string name="avaible_internal_storage">内部存储:</string>
     <string name="avaible_sd_storage">SD卡:</string>

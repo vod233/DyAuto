@@ -14,7 +14,15 @@ class AppManager:
     def start(self):
         """启动目标应用"""
         logger.info(f"正在启动应用: {self.package_name}")
-        self.d.app_start(self.package_name, use_monkey=True)
+        try:
+            self.d.app_start(self.package_name)
+        except Exception as e:
+            logger.warning(f"普通方式启动应用失败，尝试 monkey 启动: {e}")
+            self.d.app_start(self.package_name, use_monkey=True)
+
+        if not self.wait_for_foreground(timeout=8):
+            logger.warning("普通启动后应用未进入前台，尝试 monkey 启动兜底")
+            self.d.app_start(self.package_name, use_monkey=True)
 
     def stop(self):
         """停止目标应用"""

@@ -1,6 +1,12 @@
 import logging
+import sys
 import time
-from xhs.main_controller import ScoutTaskRunner
+from dy.main_controller import ScoutTaskRunner
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
 
 # 配置日志输出格式，方便在控制台查看执行过程
 logging.basicConfig(

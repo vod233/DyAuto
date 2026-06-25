@@ -294,25 +294,53 @@ def render_xhs_page():
 
             with col2:
                 with st.container(border=True, height=606):
-                    st.subheader("🤖 AI 配置")
+                    st.subheader("🔐 软件授权与 AI 算力")
+                    if st.session_state.get("license_save_msg"):
+                        st.success(st.session_state.license_save_msg)
+                        st.session_state.license_save_msg = None
                     ai_enabled = st.toggle(
                         "启用 AI 自动回复",
                         value=current_config.get("ai_enabled", True),
-                        help="抓取当前图文或视频标题后，调用 OpenAI 兼容接口自动生成评论"
+                        help="抓取当前图文或视频标题后，通过云端授权服务生成评论"
                     )
-                    ai_base_url = st.text_input(
-                        "OpenAI 兼容 Base URL",
-                        value=current_config.get("ai_base_url", "https://api.deepseek.com/v1"),
-                        placeholder="https://api.deepseek.com/v1"
-                    )
-                    ai_api_key = st.text_input(
-                        "API Key",
-                        value=current_config.get("ai_api_key", ""),
+                    if current_config.get("has_license_key"):
+                        st.success(f"已保存授权码：{current_config.get('license_key_masked', '')}")
+                    else:
+                        st.warning("尚未配置授权码，无法启动任务。")
+
+                    license_key = st.text_input(
+                        "客户授权码",
+                        value="",
                         type="password"
                     )
+                    license_server_url = st.text_input(
+                        "授权服务器",
+                        value=current_config.get("license_server_url", "https://lcjx.yun/social-ai-credit-api"),
+                        help="客户一般无需修改。脚本会通过该服务器验证授权码并扣减 AI Token 积分。"
+                    )
+                    if st.form_submit_button("🔎 验证授权码", use_container_width=True):
+                        try:
+                            verify_key = license_key.strip()
+                            if not verify_key:
+                                st.warning("请输入完整授权码后再验证。")
+                            else:
+                                verify_resp = requests.post(
+                                    f"{API_BASE_URL}/license/save?platform=xhs",
+                                    json={"license_key": verify_key, "license_server_url": license_server_url.strip()},
+                                    timeout=20,
+                                ).json()
+                                if verify_resp.get("success"):
+                                    info = verify_resp.get("data", {})
+                                    st.session_state.license_save_msg = f"授权已保存：{info.get('customer_name', '')}，剩余积分 {info.get('balance_credits', 0)}"
+                                    st.rerun()
+                                else:
+                                    st.error(verify_resp.get("message", "授权验证失败"))
+                        except Exception as e:
+                            st.error(f"验证失败: {e}")
                     ai_model = st.text_input(
                         "模型名称",
                         value=current_config.get("ai_model", "deepseek-v4-flash"),
+                        disabled=True,
                         placeholder="deepseek-v4-flash"
                     )
                     ai_temperature = st.slider(
@@ -329,7 +357,7 @@ def render_xhs_page():
                         max_value=512,
                         step=8
                     )
-                    st.caption("系统会按标题生成评论，并在后台追加社区公约过滤规则。")
+                    st.caption("DeepSeek API Key 统一保存在服务器，客户电脑只保存授权码；启动任务前会先校验授权码。")
 
             st.markdown("---")
             submitted = st.form_submit_button("💾 保存当前配置", type="primary", use_container_width=True)
@@ -342,11 +370,13 @@ def render_xhs_page():
                     "max_daily_videos": max_daily,
                     "max_videos_per_keyword": max_videos,
                     "ai_enabled": ai_enabled,
-                    "ai_base_url": ai_base_url.strip(),
-                    "ai_api_key": ai_api_key.strip(),
+                    "ai_base_url": license_server_url.strip(),
+                    "ai_api_key": "",
                     "ai_model": ai_model.strip(),
                     "ai_temperature": ai_temperature,
                     "ai_max_tokens": ai_max_tokens,
+                    "license_key": license_key.strip(),
+                    "license_server_url": license_server_url.strip(),
                 }
 
                 try:

@@ -1,11 +1,12 @@
 search:
   keywords:
-  - chrome
-  - claude
+  - 键盘
+  - 鼠标
+  - 记事本
   sort_by: latest
 crawler:
   max_daily_videos: 100
-  max_videos_per_keyword: 9
+  max_videos_per_keyword: 5
   min_video_stay: 1
   max_video_stay: 3
 comments: []
@@ -15,10 +16,20 @@ target:
 interaction:
   max_comment_swipes: 2
   max_ai_comment_reviews: 20
+  intent_keywords: []
+  enable_like: true
+  enable_author_follow: true
+  enable_video_comment: true
+  enable_comment_lead: true
   min_followers_threshold: 0.01
   enable_private_message: true
   pm_followers_threshold: 0.01
   pm_message_list:
-  - 你好，看到你的内容很有启发，主页有些资料可以参考
-  - 刚好整理过相关内容，可以看看我的主页
-  - 这个方向我也在做，主页有一些整理
+  - 看到你的内容很有启发，谢谢你
+  - 你的视频做得真好，学到了很多
+  - 内容很有价值，感谢分享
+  - 关注你了，期待更多好内容
+  - 你的分享对我帮助很大
+  - 创意很棒，继续加油
+  - 这个角度很新颖，学到了
+  - 内容质量很高，已收藏

@@ -96,7 +96,9 @@ class ScoutTaskRunner:
         logger.info("调度中心正在拉起抖音 APP...")
         self.app_mgr.start()
         # 等待其完全启动
-        self.app_mgr.wait_for_foreground()
+        if not self.app_mgr.wait_for_foreground():
+            current_app = self.device.app_current()
+            raise RuntimeError(f"抖音未进入前台，当前前台应用: {current_app}")
         
         # 确保回到首页并处理可能弹出的青少年模式等弹窗
         if not self.run_action(EnsureHomeAction):

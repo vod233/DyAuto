@@ -9,6 +9,7 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 from dy.task_runner import TikTokTaskFlow
 from dy.logger_config import setup_logger
 from dy.multi_device import select_devices_interactively
+from social_license import DEFAULT_LICENSE_SERVER_URL, LicenseError, mask_license_key, verify_license
 
 # 初始化日志记录器，这行代码会自动创建 logs 文件夹和日期时间命名的日志文件
 setup_logger()
@@ -39,17 +40,27 @@ def main():
         os.path.dirname(os.path.abspath(__file__)),
         "dy", "config", "user_settings.yaml"
     )
+    api_config_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "dy", "config", "api_settings.yaml"
+    )
     
     # 默认基础配置
     config = {
         "search": {"keywords": ["AI获客"], "sort_by": "latest"},
         "ai_reply": {
             "enabled": True,
-            "base_url": "https://api.deepseek.com/v1",
+            "mode": "cloud",
+            "cloud_base_url": DEFAULT_LICENSE_SERVER_URL,
+            "base_url": "",
             "api_key": "",
             "model": "deepseek-v4-flash",
             "temperature": 0.7,
-            "max_tokens": 120
+            "max_tokens": 120,
+            "license": {
+                "server_url": DEFAULT_LICENSE_SERVER_URL,
+                "key": "",
+            },
         },
         "crawler": {
             "max_videos_per_keyword": 5,
@@ -70,6 +81,15 @@ def main():
                             config[k] = v
         except Exception as e:
             print(f"加载历史配置失败: {e}")
+
+    if os.path.exists(api_config_path):
+        try:
+            with open(api_config_path, 'r', encoding='utf-8') as f:
+                loaded_api = yaml.safe_load(f) or {}
+                if isinstance(loaded_api.get("ai_reply"), dict):
+                    config["ai_reply"].update(loaded_api["ai_reply"])
+        except Exception as e:
+            print(f"加载 AI 授权配置失败: {e}")
             
     # 1. 用户自定义搜索关键词
     config["search"]["keywords"] = get_user_input(
@@ -77,24 +97,40 @@ def main():
         config["search"].get("keywords", [])
     )
     
-    # 2. OpenAI 兼容接口配置
-    config["ai_reply"]["base_url"] = get_text_input(
-        "2. 请输入 OpenAI 兼容 Base URL",
-        config["ai_reply"].get("base_url", "")
+    # 2. 云端授权配置
+    license_cfg = config["ai_reply"].setdefault("license", {})
+    current_mask = mask_license_key(license_cfg.get("key", ""))
+    print(f"\n2. 请输入客户授权码")
+    print(f"【当前配置】: {current_mask or '未设置'}")
+    new_license = input("请输入完整授权码 (直接回车保留当前配置): ").strip()
+    if new_license:
+        license_cfg["key"] = new_license
+
+    license_cfg["server_url"] = get_text_input(
+        "3. 授权服务器地址",
+        license_cfg.get("server_url", DEFAULT_LICENSE_SERVER_URL)
     )
-    config["ai_reply"]["model"] = get_text_input(
-        "3. 请输入模型名称",
-        config["ai_reply"].get("model", "")
-    )
-    config["ai_reply"]["api_key"] = get_text_input(
-        "4. 请输入 API Key",
-        config["ai_reply"].get("api_key", "")
-    )
+    config["ai_reply"]["mode"] = "cloud"
+    config["ai_reply"]["cloud_base_url"] = license_cfg["server_url"]
+    config["ai_reply"]["base_url"] = ""
+    config["ai_reply"]["api_key"] = ""
+    config["ai_reply"]["model"] = "deepseek-v4-flash"
+
+    try:
+        auth_info = verify_license(license_cfg.get("key", ""), license_cfg.get("server_url", DEFAULT_LICENSE_SERVER_URL))
+        print(f"✅ 授权验证通过：{auth_info.get('customer_name', '')}，剩余积分 {auth_info.get('balance_credits', 0)}")
+    except LicenseError as exc:
+        print(f"❌ 授权验证失败：{exc}")
+        return
     
     # 保存最新配置
     os.makedirs(os.path.dirname(config_path), exist_ok=True)
     with open(config_path, 'w', encoding='utf-8') as f:
-        yaml.safe_dump(config, f, allow_unicode=True)
+        user_config = {k: v for k, v in config.items() if k != "ai_reply"}
+        yaml.safe_dump(user_config, f, allow_unicode=True)
+    os.makedirs(os.path.dirname(api_config_path), exist_ok=True)
+    with open(api_config_path, 'w', encoding='utf-8') as f:
+        yaml.safe_dump({"ai_reply": config["ai_reply"]}, f, allow_unicode=True)
         
     # 5. 选择要执行任务的设备
     selected_devices = select_devices_interactively()

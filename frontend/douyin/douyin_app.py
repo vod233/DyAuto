@@ -295,6 +295,30 @@ def render_douyin_page():
                     min_stay = st.number_input("视频最小停留时间(秒)", value=current_config.get("min_video_stay", 3), min_value=1)
                     max_stay = st.number_input("视频最大停留时间(秒)", value=current_config.get("max_video_stay", 6), min_value=1)
 
+                with st.container(border=True, height=280):
+                    st.subheader("✅ 执行功能选择")
+                    enable_like = st.checkbox(
+                        "点赞",
+                        value=bool(current_config.get("enable_like", True)),
+                        help="对进入的视频执行双击点赞"
+                    )
+                    enable_author_follow = st.checkbox(
+                        "进作者主页，粉丝数判断成功，关注作者，私信作者",
+                        value=bool(current_config.get("enable_author_follow", True)),
+                        help="进入作者主页后按粉丝阈值判断，符合条件则关注，并按私信策略尝试发送私信"
+                    )
+                    enable_video_comment = st.checkbox(
+                        "AI 生成视频评论，发布视频评论",
+                        value=bool(current_config.get("enable_video_comment", True)),
+                        help="根据视频标题生成评论并发布到当前视频"
+                    )
+                    enable_comment_lead = st.checkbox(
+                        "打开评论区，AI 识别意向评论，楼中楼回复",
+                        value=bool(current_config.get("enable_comment_lead", True)),
+                        help="打开评论区，按上限识别意向评论并自动楼中楼回复"
+                    )
+                    st.caption("任务执行时会严格按本区域从上到下的顺序执行已勾选功能。")
+
             with col2:
                 with st.container(border=True, height=700):
                     st.subheader("🎯 AI 截流获客策略")
@@ -328,25 +352,53 @@ def render_douyin_page():
 
             with col3:
                 with st.container(border=True, height=700):
-                    st.subheader("🤖 AI 配置")
+                    st.subheader("🔐 软件授权与 AI 算力")
+                    if st.session_state.get("license_save_msg"):
+                        st.success(st.session_state.license_save_msg)
+                        st.session_state.license_save_msg = None
                     ai_enabled = st.toggle(
                         "启用 AI 自动回复与截流",
                         value=current_config.get("ai_enabled", True),
                         help="用于视频标题评论、评论区意向识别和楼中楼回复"
                     )
-                    ai_base_url = st.text_input(
-                        "OpenAI 兼容 Base URL",
-                        value=current_config.get("ai_base_url", "https://api.deepseek.com/v1"),
-                        placeholder="https://api.deepseek.com/v1"
-                    )
-                    ai_api_key = st.text_input(
-                        "API Key",
-                        value=current_config.get("ai_api_key", ""),
+                    if current_config.get("has_license_key"):
+                        st.success(f"已保存授权码：{current_config.get('license_key_masked', '')}")
+                    else:
+                        st.warning("尚未配置授权码，无法启动任务。")
+
+                    license_key = st.text_input(
+                        "客户授权码",
+                        value="",
                         type="password"
                     )
+                    license_server_url = st.text_input(
+                        "授权服务器",
+                        value=current_config.get("license_server_url", "https://lcjx.yun/social-ai-credit-api"),
+                        help="客户一般无需修改。脚本会通过该服务器验证授权码并扣减 AI Token 积分。"
+                    )
+                    if st.form_submit_button("🔎 验证授权码", use_container_width=True):
+                        try:
+                            verify_key = license_key.strip()
+                            if not verify_key:
+                                st.warning("请输入完整授权码后再验证。")
+                            else:
+                                verify_resp = requests.post(
+                                    f"{API_BASE_URL}/license/save?platform=douyin",
+                                    json={"license_key": verify_key, "license_server_url": license_server_url.strip()},
+                                    timeout=20,
+                                ).json()
+                                if verify_resp.get("success"):
+                                    info = verify_resp.get("data", {})
+                                    st.session_state.license_save_msg = f"授权已保存：{info.get('customer_name', '')}，剩余积分 {info.get('balance_credits', 0)}"
+                                    st.rerun()
+                                else:
+                                    st.error(verify_resp.get("message", "授权验证失败"))
+                        except Exception as e:
+                            st.error(f"验证失败: {e}")
                     ai_model = st.text_input(
                         "模型名称",
                         value=current_config.get("ai_model", "deepseek-v4-flash"),
+                        disabled=True,
                         placeholder="deepseek-v4-flash"
                     )
                     ai_temperature = st.slider(
@@ -363,7 +415,7 @@ def render_douyin_page():
                         max_value=512,
                         step=8
                     )
-                    st.caption("同一套 AI 配置用于标题评论、评论区意向识别和楼中楼回复。")
+                    st.caption("DeepSeek API Key 统一保存在服务器，客户电脑只保存授权码；启动任务前会先校验授权码。")
 
             st.markdown("---")
             with st.container(border=True):
@@ -424,16 +476,22 @@ def render_douyin_page():
                     "max_comment_swipes": max_swipes,
                     "max_ai_comment_reviews": max_ai_reviews,
                     "intent_keywords": [k.strip() for k in intent_keywords.split(",") if k.strip()],
+                    "enable_like": enable_like,
+                    "enable_author_follow": enable_author_follow,
+                    "enable_video_comment": enable_video_comment,
+                    "enable_comment_lead": enable_comment_lead,
                     "min_followers_threshold": min_followers,
                     "enable_private_message": enable_pm,
                     "pm_followers_threshold": pm_threshold,
                     "pm_message_list": [m.strip() for m in pm_messages_str.split("\n") if m.strip()],
                     "ai_enabled": ai_enabled,
-                    "ai_base_url": ai_base_url.strip(),
-                    "ai_api_key": ai_api_key.strip(),
+                    "ai_base_url": license_server_url.strip(),
+                    "ai_api_key": "",
                     "ai_model": ai_model.strip(),
                     "ai_temperature": ai_temperature,
                     "ai_max_tokens": ai_max_tokens,
+                    "license_key": license_key.strip(),
+                    "license_server_url": license_server_url.strip(),
                 }
 
                 try:

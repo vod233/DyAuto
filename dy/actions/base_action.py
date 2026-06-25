@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import logging
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -7,6 +8,7 @@ class BaseAction(ABC):
     """
     动作基类：所有的具体业务逻辑（如刷视频、点赞、搜索、关注）都应该继承此类。
     实现了业务与设备的解耦，保证扩展性。
+    集成防风控引擎，提供人性化操作接口。
     """
     def __init__(self, u2_device, app_manager=None, config=None, **kwargs):
         """
@@ -25,6 +27,38 @@ class BaseAction(ABC):
         
         # 默认设置全局操作超时时间 (可被子类重写)
         self.d.implicitly_wait(10.0)
+
+        # 初始化防风控引擎
+        from ..anti_detection import AntiDetectionEngine
+        self.anti = AntiDetectionEngine(config=self.config)
+
+    def human_swipe(self, sx, sy, ex, ey, duration=None):
+        """人性化滑动（贝塞尔曲线 + 随机抖动）"""
+        self.anti.human_swipe(self.d, sx, sy, ex, ey, duration)
+
+    def human_swipe_curve(self, sx, sy, ex, ey, duration=None):
+        """贝塞尔曲线滑动"""
+        self.anti.human_swipe_curve(self.d, sx, sy, ex, ey, duration)
+
+    def human_click(self, x, y, jitter_range=8):
+        """人性化点击（坐标随机抖动）"""
+        self.anti.human_click(self.d, x, y, jitter_range)
+
+    def human_double_click(self, x, y, jitter_range=10):
+        """人性化双击"""
+        self.anti.human_double_click(self.d, x, y, jitter_range)
+
+    def human_sleep(self, sleep_type='normal', custom_range=None):
+        """人性化等待"""
+        return self.anti.sleep(sleep_type, custom_range)
+
+    def should_interact(self, action_type):
+        """概率决策是否执行互动"""
+        return self.anti.should_interact(action_type)
+
+    def can_do(self, action_type):
+        """检查每日限额"""
+        return self.anti.can_do(action_type)
 
     @abstractmethod
     def execute(self, *args, **kwargs):

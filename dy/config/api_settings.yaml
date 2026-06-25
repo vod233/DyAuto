@@ -1,7 +1,12 @@
 ai_reply:
   enabled: true
-  base_url: https://api.deepseek.com/v1
+  mode: cloud
+  cloud_base_url: https://lcjx.yun/social-ai-credit-api
+  base_url: ''
   api_key: ''
   model: deepseek-v4-flash
   temperature: 0.7
   max_tokens: 120
+  license:
+    server_url: https://lcjx.yun/social-ai-credit-api
+    key: saa_DTFje43GdrtsYwWtax3xi5xQ79HOhT5o

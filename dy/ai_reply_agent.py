@@ -5,6 +5,7 @@ import threading
 from typing import Optional
 
 from dotenv import load_dotenv
+from social_license import CloudAIClient, LicenseError
 
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"), override=True)
 
@@ -39,6 +40,7 @@ class DYReplyAgent:
     def __init__(self, config: Optional[dict] = None):
         self.config = config or {}
         self.ai_config = self.config.get("ai_reply", {})
+        self.cloud_ai = CloudAIClient(self.ai_config, platform="douyin")
 
     def is_enabled(self) -> bool:
         return bool(self.ai_config.get("enabled", True))
@@ -80,7 +82,7 @@ class DYReplyAgent:
         if not self.is_enabled():
             return self._local_intent_guess(clean_comment, custom_keywords)
 
-        result = self._call_intent_model(clean_comment, video_title, keyword)
+        result = self._call_intent_model(clean_comment, video_title, keyword, custom_keywords)
         if result is None:
             return self._local_intent_guess(clean_comment, custom_keywords)
 
@@ -110,6 +112,21 @@ class DYReplyAgent:
         return None
 
     def _call_model(self, title: str, keyword: str, strict_retry: bool = False) -> Optional[str]:
+        if self.cloud_ai.enabled():
+            try:
+                data = self.cloud_ai.post("/ai/generate-video-comment", {
+                    "keyword": keyword,
+                    "title": title,
+                })
+                return data.get("reply")
+            except LicenseError as exc:
+                logger.error(f"云端 AI 生成视频评论失败: {exc}")
+                return None
+
+        if self.ai_config.get("mode", "cloud") != "local":
+            logger.warning("未配置授权码，无法调用云端 AI 生成视频评论。")
+            return None
+
         base_url = os.environ.get("DEEPSEEK_BASE_URL") or (self.ai_config.get("base_url") or "").strip()
         api_key = os.environ.get("DEEPSEEK_API_KEY") or (self.ai_config.get("api_key") or "").strip()
         model = os.environ.get("DEEPSEEK_MODEL") or (self.ai_config.get("model") or "").strip()
@@ -125,6 +142,10 @@ class DYReplyAgent:
         return self._call_langchain(title, keyword, base_url, api_key, model, strict_retry)
 
     def _get_model_config(self):
+        if self.ai_config.get("mode", "cloud") != "local":
+            logger.warning("未配置授权码，无法调用云端 AI。")
+            return None
+
         base_url = os.environ.get("DEEPSEEK_BASE_URL") or (self.ai_config.get("base_url") or "").strip()
         api_key = os.environ.get("DEEPSEEK_API_KEY") or (self.ai_config.get("api_key") or "").strip()
         model = os.environ.get("DEEPSEEK_MODEL") or (self.ai_config.get("model") or "").strip()
@@ -161,7 +182,20 @@ class DYReplyAgent:
                 logger.error(f"LangChain 调用 AI 回复失败: {exc}")
                 return None
 
-    def _call_intent_model(self, comment_text: str, video_title: str, keyword: str) -> Optional[bool]:
+    def _call_intent_model(self, comment_text: str, video_title: str, keyword: str, custom_keywords: Optional[list] = None) -> Optional[bool]:
+        if self.cloud_ai.enabled():
+            try:
+                data = self.cloud_ai.post("/ai/check-intent-comment", {
+                    "keyword": keyword,
+                    "title": video_title,
+                    "comment_text": comment_text,
+                    "custom_keywords": custom_keywords or [],
+                })
+                return bool(data.get("intent"))
+            except LicenseError as exc:
+                logger.error(f"云端 AI 判断评论意向失败: {exc}")
+                return None
+
         model_config = self._get_model_config()
         if not model_config:
             return None
@@ -197,6 +231,18 @@ class DYReplyAgent:
                 return None
 
     def _call_lead_reply_model(self, comment_text: str, video_title: str, keyword: str, strict_retry: bool = False) -> Optional[str]:
+        if self.cloud_ai.enabled():
+            try:
+                data = self.cloud_ai.post("/ai/generate-lead-reply", {
+                    "keyword": keyword,
+                    "title": video_title,
+                    "comment_text": comment_text,
+                })
+                return data.get("reply")
+            except LicenseError as exc:
+                logger.error(f"云端 AI 生成截流回复失败: {exc}")
+                return None
+
         model_config = self._get_model_config()
         if not model_config:
             return None

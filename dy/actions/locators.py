@@ -26,6 +26,7 @@ class TikTokLocators:
     # 4. 视频级互动 (Video Interaction)
     # ==========================================
     PROFILE_FOLLOW_BTN = "关注"
+    LIKE_BTN_DYNAMIC = '//*[contains(@content-desc, "喜欢") and contains(@content-desc, "按钮")]'
     SHARE_BTN_DYNAMIC = '//*[starts-with(@content-desc, "分享") and contains(@content-desc, "按钮")]'
     SHARE_PANEL_CONTAINER = "com.ss.android.ugc.aweme:id/function_container"
     COPY_LINK_BTN = '//*[@text="分享链接" or @text="复制链接"]'

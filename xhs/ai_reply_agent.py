@@ -4,6 +4,7 @@ import re
 from typing import Optional
 
 from dotenv import load_dotenv
+from social_license import CloudAIClient, LicenseError
 
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"), override=True)
 
@@ -35,6 +36,7 @@ class XHSReplyAgent:
     def __init__(self, config: Optional[dict] = None):
         self.config = config or {}
         self.ai_config = self.config.get("ai_reply", {})
+        self.cloud_ai = CloudAIClient(self.ai_config, platform="xhs")
 
     def is_enabled(self) -> bool:
         return bool(self.ai_config.get("enabled", True))
@@ -67,6 +69,21 @@ class XHSReplyAgent:
         return None
 
     def _call_model(self, title: str, keyword: str, strict_retry: bool = False) -> Optional[str]:
+        if self.cloud_ai.enabled():
+            try:
+                data = self.cloud_ai.post("/ai/generate-video-comment", {
+                    "keyword": keyword,
+                    "title": title,
+                })
+                return data.get("reply")
+            except LicenseError as exc:
+                logger.error(f"云端 AI 生成小红书评论失败: {exc}")
+                return None
+
+        if self.ai_config.get("mode", "cloud") != "local":
+            logger.warning("未配置授权码，无法调用云端 AI 生成小红书评论。")
+            return None
+
         base_url = (
             os.environ.get("DEEPSEEK_BASE_URL")
             or os.environ.get("DASHSCOPE_BASE_URL")

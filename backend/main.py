@@ -26,7 +26,8 @@ from dy.task_runner import TikTokTaskFlow as DouyinTaskFlow
 from wireless_connect import run_cmd, ADB_BIN
 from usb_connect import detect_usb_devices
 
-from backend.schemas import AppConfig, TaskStartRequest, TaskResponse, DeviceConnectRequest, DevicePairRequest
+from backend.schemas import AppConfig, TaskStartRequest, TaskResponse, DeviceConnectRequest, DevicePairRequest, LicenseVerifyRequest
+from social_license import DEFAULT_LICENSE_SERVER_URL, LicenseError, mask_license_key, verify_license
 
 # 初始化全局日志
 setup_logger()
@@ -263,17 +264,23 @@ def _load_xhs_runtime_config():
 
 def _load_xhs_config_for_frontend():
     data = _load_xhs_runtime_config()
+    license_data = data.get("ai_reply", {}).get("license", {}) if isinstance(data.get("ai_reply", {}).get("license"), dict) else {}
+    license_key = license_data.get("key") or data.get("ai_reply", {}).get("license_key", "")
     return {
         "search_keywords": data.get("search", {}).get("keywords", []),
         "sort_by": _normalize_sort_mode(data.get("search", {}).get("sort_by", "latest")),
         "max_daily_videos": data.get("crawler", {}).get("max_daily_videos", 100),
         "max_videos_per_keyword": data.get("crawler", {}).get("max_videos_per_keyword", 5),
         "ai_enabled": data.get("ai_reply", {}).get("enabled", True),
-        "ai_base_url": data.get("ai_reply", {}).get("base_url", "https://api.deepseek.com/v1"),
-        "ai_api_key": data.get("ai_reply", {}).get("api_key", ""),
+        "ai_base_url": data.get("ai_reply", {}).get("cloud_base_url", DEFAULT_LICENSE_SERVER_URL),
+        "ai_api_key": "",
         "ai_model": data.get("ai_reply", {}).get("model", "deepseek-v4-flash"),
         "ai_temperature": data.get("ai_reply", {}).get("temperature", 0.7),
         "ai_max_tokens": data.get("ai_reply", {}).get("max_tokens", 120),
+        "license_key": "",
+        "license_key_masked": mask_license_key(license_key),
+        "has_license_key": bool(license_key),
+        "license_server_url": license_data.get("server_url", DEFAULT_LICENSE_SERVER_URL),
         # 抖音专属字段，小红书页面不需要但前端 AppConfig 要求返回
         "comments": [],
         "target_keywords": [],
@@ -285,6 +292,11 @@ def _load_xhs_config_for_frontend():
 
 
 def _save_xhs_config(config: AppConfig):
+    previous_api_data = _load_yaml_file(XHS_API_CONFIG_PATH)
+    previous_ai = previous_api_data.get("ai_reply", {}) if isinstance(previous_api_data.get("ai_reply"), dict) else {}
+    previous_license = previous_ai.get("license", {}) if isinstance(previous_ai.get("license"), dict) else {}
+    license_key = (config.license_key or "").strip() or previous_license.get("key", "") or previous_ai.get("license_key", "")
+    license_server_url = (config.license_server_url or "").strip() or previous_license.get("server_url", DEFAULT_LICENSE_SERVER_URL)
     user_yaml_data = {
         "search": {
             "keywords": config.search_keywords,
@@ -304,11 +316,17 @@ def _save_xhs_config(config: AppConfig):
     api_yaml_data = {
         "ai_reply": {
             "enabled": config.ai_enabled,
-            "base_url": config.ai_base_url,
-            "api_key": config.ai_api_key,
+            "mode": "cloud",
+            "cloud_base_url": license_server_url,
+            "base_url": "",
+            "api_key": "",
             "model": config.ai_model,
             "temperature": config.ai_temperature,
             "max_tokens": config.ai_max_tokens,
+            "license": {
+                "server_url": license_server_url,
+                "key": license_key,
+            },
         },
     }
     _save_yaml_file(XHS_USER_CONFIG_PATH, user_yaml_data)
@@ -360,6 +378,8 @@ def _load_douyin_runtime_config():
 
 def _load_douyin_config_for_frontend():
     data = _load_douyin_runtime_config()
+    license_data = data.get("ai_reply", {}).get("license", {}) if isinstance(data.get("ai_reply", {}).get("license"), dict) else {}
+    license_key = license_data.get("key") or data.get("ai_reply", {}).get("license_key", "")
     return {
         "search_keywords": data.get("search", {}).get("keywords", []),
         "sort_by": data.get("search", {}).get("sort_by", "latest"),
@@ -373,20 +393,35 @@ def _load_douyin_config_for_frontend():
         "max_comment_swipes": data.get("interaction", {}).get("max_comment_swipes", 2),
         "max_ai_comment_reviews": data.get("interaction", {}).get("max_ai_comment_reviews", 20),
         "intent_keywords": ",".join(data.get("interaction", {}).get("intent_keywords", [])),
+        "enable_like": data.get("interaction", {}).get("enable_like", True),
+        "enable_author_follow": data.get("interaction", {}).get("enable_author_follow", True),
+        "enable_video_comment": data.get("interaction", {}).get("enable_video_comment", True),
+        "enable_comment_lead": data.get("interaction", {}).get("enable_comment_lead", True),
         "min_followers_threshold": data.get("interaction", {}).get("min_followers_threshold", 0),
         "enable_private_message": data.get("interaction", {}).get("enable_private_message", True),
         "pm_followers_threshold": data.get("interaction", {}).get("pm_followers_threshold", 1),
         "pm_message_list": data.get("interaction", {}).get("pm_message_list", []),
         "ai_enabled": data.get("ai_reply", {}).get("enabled", True),
-        "ai_base_url": data.get("ai_reply", {}).get("base_url", "https://api.deepseek.com/v1"),
-        "ai_api_key": data.get("ai_reply", {}).get("api_key", ""),
+        "ai_base_url": data.get("ai_reply", {}).get("cloud_base_url", DEFAULT_LICENSE_SERVER_URL),
+        "ai_api_key": "",
         "ai_model": data.get("ai_reply", {}).get("model", "deepseek-v4-flash"),
         "ai_temperature": data.get("ai_reply", {}).get("temperature", 0.7),
         "ai_max_tokens": data.get("ai_reply", {}).get("max_tokens", 120),
+        "license_key": "",
+        "license_key_masked": mask_license_key(license_key),
+        "has_license_key": bool(license_key),
+        "license_server_url": license_data.get("server_url", DEFAULT_LICENSE_SERVER_URL),
     }
 
 
 def _save_douyin_config(config: AppConfig):
+    previous_api_data = _load_yaml_file(DY_API_CONFIG_PATH)
+    previous_ai = previous_api_data.get("ai_reply", {}) if isinstance(previous_api_data.get("ai_reply"), dict) else {}
+    previous_license = previous_ai.get("license", {}) if isinstance(previous_ai.get("license"), dict) else {}
+    license_key = (config.license_key or "").strip() or previous_license.get("key", "") or previous_ai.get("license_key", "")
+    license_server_url = (config.license_server_url or "").strip() or previous_license.get("server_url", DEFAULT_LICENSE_SERVER_URL)
+    # 读取已有用户配置，保留前端未覆盖的段落（如 anti_detection 防风控配置）
+    previous_user_data = _load_yaml_file(DY_USER_CONFIG_PATH)
     user_yaml_data = {
         "search": {
             "keywords": config.search_keywords,
@@ -407,24 +442,85 @@ def _save_douyin_config(config: AppConfig):
             "max_comment_swipes": config.max_comment_swipes,
             "max_ai_comment_reviews": config.max_ai_comment_reviews,
             "intent_keywords": config.intent_keywords,
+            "enable_like": config.enable_like,
+            "enable_author_follow": config.enable_author_follow,
+            "enable_video_comment": config.enable_video_comment,
+            "enable_comment_lead": config.enable_comment_lead,
             "min_followers_threshold": config.min_followers_threshold,
             "enable_private_message": config.enable_private_message,
             "pm_followers_threshold": config.pm_followers_threshold,
             "pm_message_list": config.pm_message_list,
         }
     }
+    # 保留前端未直接管理的配置段（防风控参数等），避免被覆盖丢失
+    if isinstance(previous_user_data, dict):
+        for preserve_key in ("anti_detection",):
+            if preserve_key in previous_user_data and preserve_key not in user_yaml_data:
+                user_yaml_data[preserve_key] = previous_user_data[preserve_key]
     api_yaml_data = {
         "ai_reply": {
             "enabled": config.ai_enabled,
-            "base_url": config.ai_base_url,
-            "api_key": config.ai_api_key,
+            "mode": "cloud",
+            "cloud_base_url": license_server_url,
+            "base_url": "",
+            "api_key": "",
             "model": config.ai_model,
             "temperature": config.ai_temperature,
             "max_tokens": config.ai_max_tokens,
+            "license": {
+                "server_url": license_server_url,
+                "key": license_key,
+            },
         },
     }
     _save_yaml_file(DY_USER_CONFIG_PATH, user_yaml_data)
     _save_yaml_file(DY_API_CONFIG_PATH, api_yaml_data)
+
+
+def _get_license_config_for_platform(platform: str) -> dict:
+    api_path = DY_API_CONFIG_PATH if platform == "douyin" else XHS_API_CONFIG_PATH
+    api_data = _load_yaml_file(api_path)
+    ai_reply = api_data.get("ai_reply", {}) if isinstance(api_data.get("ai_reply"), dict) else {}
+    license_data = ai_reply.get("license", {}) if isinstance(ai_reply.get("license"), dict) else {}
+    return {
+        "key": (license_data.get("key") or ai_reply.get("license_key") or "").strip(),
+        "server_url": (license_data.get("server_url") or ai_reply.get("cloud_base_url") or DEFAULT_LICENSE_SERVER_URL).strip(),
+    }
+
+
+def _verify_platform_license(platform: str, device_id: str = "") -> dict:
+    license_config = _get_license_config_for_platform(platform)
+    try:
+        return verify_license(
+            license_config.get("key", ""),
+            license_config.get("server_url", DEFAULT_LICENSE_SERVER_URL),
+            device_id=device_id,
+        )
+    except LicenseError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+
+
+def _save_platform_license(platform: str, license_key: str, server_url: str) -> None:
+    api_path = DY_API_CONFIG_PATH if platform == "douyin" else XHS_API_CONFIG_PATH
+    api_data = _load_yaml_file(api_path)
+    ai_reply = api_data.get("ai_reply", {}) if isinstance(api_data.get("ai_reply"), dict) else {}
+    license_server_url = (server_url or "").strip() or DEFAULT_LICENSE_SERVER_URL
+    api_data["ai_reply"] = {
+        **ai_reply,
+        "enabled": ai_reply.get("enabled", True),
+        "mode": "cloud",
+        "cloud_base_url": license_server_url,
+        "base_url": "",
+        "api_key": "",
+        "model": ai_reply.get("model", "deepseek-v4-flash"),
+        "temperature": ai_reply.get("temperature", 0.7),
+        "max_tokens": ai_reply.get("max_tokens", 120),
+        "license": {
+            "server_url": license_server_url,
+            "key": (license_key or "").strip(),
+        },
+    }
+    _save_yaml_file(api_path, api_data)
 
 
 # ======================== API 路由 ========================
@@ -522,6 +618,12 @@ def api_save_config(config: AppConfig, platform: str = "xhs"):
     - platform: "xhs" (小红书) 或 "douyin" (抖音)，默认为 "xhs"
     """
     try:
+        if (config.license_key or "").strip():
+            verify_license(
+                config.license_key,
+                config.license_server_url or DEFAULT_LICENSE_SERVER_URL,
+            )
+
         if platform == "douyin":
             old_data = _load_yaml_file(DY_USER_CONFIG_PATH)
             previous_max_daily = old_data.get("crawler", {}).get("max_daily_videos") if isinstance(old_data.get("crawler"), dict) else None
@@ -545,8 +647,59 @@ def api_save_config(config: AppConfig, platform: str = "xhs"):
             }
 
         return {"success": True, "message": "配置保存成功"}
+    except LicenseError as e:
+        return {"success": False, "message": f"授权码验证失败: {str(e)}"}
     except Exception as e:
         return {"success": False, "message": f"保存配置失败: {str(e)}"}
+
+
+@app.post("/api/license/verify", summary="验证客户授权码")
+def api_verify_license(req: LicenseVerifyRequest):
+    try:
+        data = verify_license(
+            req.license_key,
+            req.license_server_url or DEFAULT_LICENSE_SERVER_URL,
+            device_id=req.device_id,
+        )
+        return {
+            "success": True,
+            "message": "授权码验证成功",
+            "data": {
+                "customer_name": data.get("customer_name", ""),
+                "status": data.get("status", ""),
+                "balance_credits": data.get("balance_credits", 0),
+                "token_per_credit": data.get("token_per_credit", 1000),
+                "license_key_masked": mask_license_key(req.license_key),
+            },
+        }
+    except LicenseError as exc:
+        return {"success": False, "message": str(exc), "data": {}}
+
+
+@app.post("/api/license/save", summary="验证并保存客户授权码")
+def api_save_license(req: LicenseVerifyRequest, platform: str = "xhs"):
+    try:
+        data = verify_license(
+            req.license_key,
+            req.license_server_url or DEFAULT_LICENSE_SERVER_URL,
+            device_id=req.device_id,
+        )
+        _save_platform_license(platform, req.license_key, req.license_server_url or DEFAULT_LICENSE_SERVER_URL)
+        return {
+            "success": True,
+            "message": "授权码验证并保存成功",
+            "data": {
+                "customer_name": data.get("customer_name", ""),
+                "status": data.get("status", ""),
+                "balance_credits": data.get("balance_credits", 0),
+                "token_per_credit": data.get("token_per_credit", 1000),
+                "license_key_masked": mask_license_key(req.license_key),
+            },
+        }
+    except LicenseError as exc:
+        return {"success": False, "message": str(exc), "data": {}}
+    except Exception as exc:
+        return {"success": False, "message": f"保存授权码失败: {exc}", "data": {}}
 
 
 # ----------------- 接口: 任务控制 -----------------
@@ -613,6 +766,16 @@ def run_task_on_device(serial: str, platform: str = "xhs", startup_delay: float 
 def api_start_tasks(req: TaskStartRequest):
     if not req.devices:
         return {"success": False, "message": "未选择任何设备"}
+
+    try:
+        license_info = _verify_platform_license(req.platform, device_id=req.devices[0] if req.devices else "")
+        logging.info(
+            "授权码验证通过，客户: %s，剩余积分: %s",
+            license_info.get("customer_name", ""),
+            license_info.get("balance_credits", ""),
+        )
+    except HTTPException as exc:
+        return {"success": False, "message": f"授权校验失败：{exc.detail}"}
 
     started_devices = []
     skipped_devices = []

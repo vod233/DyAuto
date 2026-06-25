@@ -31,7 +31,7 @@ def _is_visible_enabled(node):
 
 def _set_text_to_input(d, input_node, text):
     input_node.click()
-    time.sleep(0.2)
+    time.sleep(random.uniform(0.15, 0.3))
     resource_id = input_node.info.get('resourceId') or input_node.info.get('resourceName')
     if resource_id:
         try:
@@ -59,44 +59,73 @@ def _set_text_to_input(d, input_node, text):
 
 
 class DoubleClickLikeAction(BaseAction):
-    """双击屏幕中心区域点赞"""
+    """点击右侧心形按钮点赞，避免双击视频区域触发长按菜单。"""
     def execute(self):
-        w, h = self.d.window_size()
-        cx, cy = int(w / 2), int(h / 2)
-        self.d.click(cx, cy)
-        time.sleep(0.1)
-        self.d.click(cx, cy)
-        logger.info("已执行双击点赞")
+        try:
+            ui_xml = self.d.dump_hierarchy(compressed=True) or ""
+        except Exception as exc:
+            logger.warning(f"读取 UI 层级失败，跳过点赞: {exc}")
+            return False
+
+        if "已点赞" in ui_xml:
+            logger.info("当前视频已经点赞，跳过重复点击")
+            return True
+
+        match = re.search(
+            r'content-desc="[^"]*未点赞[^"]*喜欢[^"]*按钮[^"]*"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',
+            ui_xml,
+        )
+        if not match:
+            logger.warning("未在 UI 层级中找到未点赞喜欢按钮，跳过点赞")
+            return False
+
+        left, top, right, bottom = map(int, match.groups())
+        x = int((left + right) / 2)
+        y = int((top + bottom) / 2)
+        self.human_click(x, y, jitter_range=5)
+        logger.info(f"已短按右侧喜欢按钮: ({x}, {y})")
         return True
 
 class FollowAuthorAction(BaseAction):
     """滑动到作者主页并关注，然后返回视频页（支持粉丝数过滤和私信功能）"""
-    
+
     _FOLLOWER_PATTERNS = [
+        # "1234粉丝" 或 "1.2万粉丝"（标签和数字合并显示）
         re.compile(r'(\d+(?:\.\d+)?)\s*[万wW]?\s*粉丝'),
+        # "粉丝1234" 或 "粉丝1.2万"
         re.compile(r'粉丝\s*(\d+(?:\.\d+)?)\s*[万wW]?'),
+        # "1.2万"、"3w"（带单位的纯数字）
         re.compile(r'(\d+(?:\.\d+)?)\s*[万wW]'),
+        # "7146"（独立数字，抖音新版 UI 中数字和"粉丝"标签分离）
+        re.compile(r'^(\d+(?:\.\d+)?)$'),
     ]
-    
+
     def execute(self):
-        # 1. 滑动到主页
+        # 1. 滑动到主页（人性化滑动）
         w, h = self.d.window_size()
-        self.d.swipe(int(w * 0.9), int(h / 2), int(w * 0.1), int(h / 2), duration=0.2)
-        time.sleep(3)
-        
+        sx = int(w * 0.72) + random.randint(-10, 10)
+        sy = int(h / 2) + random.randint(-10, 10)
+        ex = int(w * 0.1) + random.randint(-10, 10)
+        ey = int(h / 2) + random.randint(-10, 10)
+        self.human_swipe_curve(sx, sy, ex, ey, duration=random.uniform(0.10, 0.16))
+        self.human_sleep('slow')
+
         # 2. 获取作者粉丝数量
         follower_count = self._extract_follower_count()
         logger.info(f"作者粉丝数: {follower_count if follower_count else '未知'}")
-        
+
         # 3. 根据阈值判断是否关注
         min_followers = self._get_min_followers_threshold()
         should_follow = True
         followed = False
-        if min_followers > 0 and follower_count is not None:
-            if follower_count < min_followers:
+        if min_followers > 0:
+            if follower_count is None:
+                logger.info(f"作者粉丝数未知，已设置关注阈值({min_followers})，跳过关注")
+                should_follow = False
+            elif follower_count < min_followers:
                 logger.info(f"作者粉丝数({follower_count})低于关注阈值({min_followers})，跳过关注")
                 should_follow = False
-        
+
         # 4. 执行关注
         if should_follow:
             follow_btn = self.d(text=L.PROFILE_FOLLOW_BTN, clickable=True)
@@ -104,70 +133,75 @@ class FollowAuthorAction(BaseAction):
                 follow_btn.click()
                 logger.info("成功点击关注")
                 followed = True
-                time.sleep(1.5)
+                self.human_sleep('normal')
             else:
                 logger.info("未找到'关注'按钮，可能已经关注过了")
-        
+
         # 5. 判断是否发送私信（仅当成功关注且粉丝数大于私信阈值时）
         private_message_sent = False
         if should_follow:
             private_message_sent = self._try_send_private_message(follower_count)
-        
-        # 6. 返回视频页
-        self._return_to_video_page()
+
+        # 6. 返回视频页。返回失败时由任务流状态机跳过当前视频剩余动作。
+        returned_to_video = self._return_to_video_page()
         return {
             "should_follow": should_follow,
             "followed": followed,
             "private_message_sent": private_message_sent,
             "follower_count": follower_count,
+            "returned_to_video": returned_to_video,
         }
-    
+
     def _get_min_followers_threshold(self):
         """获取配置的最小粉丝数阈值（单位：万）"""
         return float(self.config.get('interaction', {}).get('min_followers_threshold', 0))
-    
+
     def _try_send_private_message(self, follower_count):
         """尝试发送私信（仅当粉丝数大于私信阈值时）"""
+        if hasattr(self, "private_message_allowed") and not self.private_message_allowed:
+            logger.info("本次任务未允许发送私信，跳过私信")
+            return False
+
         # 检查私信功能是否启用
         if not self.config.get('interaction', {}).get('enable_private_message', False):
             return False
-        
+
         # 检查粉丝数是否达到私信阈值
         pm_threshold = float(self.config.get('interaction', {}).get('pm_followers_threshold', 10))
         if follower_count is None or follower_count <= pm_threshold:
             logger.info(f"作者粉丝数({follower_count})未达到私信阈值({pm_threshold})，跳过私信")
             return False
-        
+
         # 获取私信话术列表
         message_list = self.config.get('interaction', {}).get('pm_message_list', [])
         if not message_list:
             logger.warning("私信话术词库为空，无法发送私信")
             return False
-        
+
         # 随机选择一条话术
         message = random.choice(message_list)
         logger.info(f"准备发送私信: {message}")
-        
+
         # 执行私信发送
         try:
             return self._send_private_message(message)
         except Exception as e:
             logger.error(f"发送私信失败: {e}")
             return False
-    
+
     def _send_private_message(self, message):
         """执行发送私信操作"""
         w, h = self.d.window_size()
-        
+
         # 1. 查找私信按钮（消息/私信图标）
         message_btn = None
-        
+
         # 方式1: 通过 content-desc 查找私信按钮（使用定位器配置）
         message_nodes = self.d.xpath(L.PM_BTN_DESC).all()
         if message_nodes:
             message_btn = message_nodes[0]
             logger.info("通过 content-desc 找到私信按钮")
-        
+
         # 方式2: 通过文本查找私信按钮（使用定位器配置）
         if not message_btn:
             message_text_nodes = self.d.xpath(f'//*[@text="{L.PM_BTN_TEXT}"]').all()
@@ -176,35 +210,35 @@ class FollowAuthorAction(BaseAction):
                 clickable_btns = [btn for btn in message_text_nodes if btn.info.get('clickable', False)]
                 message_btn = clickable_btns[0] if clickable_btns else message_text_nodes[0]
                 logger.info("通过文本找到私信按钮")
-        
+
         # 方式3: 通过常见位置坐标点击（作者主页私信按钮通常在头像附近）
         if not message_btn:
             logger.info("未找到私信按钮，尝试常见位置")
             # 尝试点击头像下方区域（作者主页常见位置）
-            self.d.click(int(w * 0.5), int(h * 0.35))
-            time.sleep(2)
-            
+            self.human_click(int(w * 0.5), int(h * 0.35))
+            self.human_sleep('normal')
+
             # 再次查找私信输入框
             input_nodes = self.d.xpath(f'//{L.PM_EDIT_TEXT_CLASS}').all()
             if input_nodes:
                 message_btn = input_nodes[0]
                 logger.info("找到输入框")
-        
+
         if message_btn:
             try:
                 message_btn.click()
-                time.sleep(2)
+                self.human_sleep('normal')
             except Exception:
                 logger.warning("点击私信按钮失败，尝试直接查找输入框")
-        
+
         # 2. 查找输入框并输入消息
         input_edit = self._find_private_message_input(timeout=4)
-        
+
         if input_edit:
             if not _set_text_to_input(self.d, input_edit, message):
                 logger.warning("私信输入失败，无法发送私信")
                 return False
-            time.sleep(1.5)
+            self.human_sleep('normal')
 
             if self._send_private_message_from_input(input_edit, message):
                 logger.info("私信发送成功并已验证")
@@ -318,8 +352,8 @@ class FollowAuthorAction(BaseAction):
         )
         for x, y in click_points:
             logger.info(f"尝试点击私信页面右下发送区域: ({x}, {y})")
-            self.d.click(x, y)
-            time.sleep(0.8)
+            self.human_click(x, y)
+            self.human_sleep('fast', custom_range=(0.5, 1.0))
             return True
         return False
 
@@ -417,7 +451,7 @@ class FollowAuthorAction(BaseAction):
             if current_text and message in current_text:
                 logger.info("私信输入框仍包含待发送文本，判定未发送")
                 return False
-            time.sleep(1.0)
+            time.sleep(random.uniform(0.8, 1.5))
             if self._has_private_message_failure():
                 return False
             logger.info("未匹配到消息气泡，但输入框文本已清空，按已发送处理")
@@ -437,13 +471,13 @@ class FollowAuthorAction(BaseAction):
         except Exception as e:
             logger.warning(f"检查私信失败提示时出错: {e}")
             return False
-    
+
     def _verify_message_sent(self, message):
         """验证消息是否成功发送（检查消息气泡是否出现）"""
         try:
             if self._has_private_message_failure():
                 return False
-            
+
             message_bubbles = self.d.xpath(L.PM_MESSAGE_TEXT_XPATH).all()
             if message_bubbles:
                 # 优先检查底部的消息（刚发送的消息通常在底部）
@@ -457,17 +491,22 @@ class FollowAuthorAction(BaseAction):
                         return False
                     if text and message in text:
                         return True
-            
+
             logger.debug("未找到已发送的消息气泡")
             return False
         except Exception as e:
             logger.warning(f"验证消息发送失败: {e}")
             return False
-    
+
     def _extract_follower_count(self):
-        """从作者主页提取粉丝数量（单位：万）"""
+        """从作者主页提取粉丝数量（单位：万）
+
+        抖音作者主页 UI 中，粉丝数和"粉丝"标签是分离的两个 sibling TextView：
+        例如 text='7146' (bounds=[517,686][631,741]) 和 text='粉丝' (bounds=[640,685][724,742])
+        需要先定位"粉丝"标签节点，再在其同行相邻节点中找到数字节点。
+        """
         try:
-            # 方式1: 查找包含"粉丝"字样的节点
+            # 方式1: 查找包含"粉丝"字样的节点（兼容旧版 UI，粉丝数和标签合在一起的情况）
             follower_nodes = self.d.xpath('//*[contains(@text, "粉丝")]').all()
             for node in follower_nodes:
                 text = str(node.info.get('text', '')).strip()
@@ -475,44 +514,101 @@ class FollowAuthorAction(BaseAction):
                     count = self._parse_follower_text(text)
                     if count:
                         return count
-            
-            # 方式2: 遍历所有 TextView 查找粉丝数
+
+            # 方式2: 抖音新版 UI，"粉丝"标签和数字是分离的 sibling 节点
             all_text_nodes = self.d.xpath('//android.widget.TextView').all()
+            # 收集所有可见 TextView 及其 bounds
+            visible_nodes = []
             for node in all_text_nodes:
-                text = str(node.info.get('text', '')).strip()
-                if text and ('粉丝' in text or ('万' in text and len(text) <= 8)):
+                info = node.info
+                text = str(info.get('text', '') or '').strip()
+                bounds = info.get('bounds', {}) or {}
+                if text and bounds:
+                    visible_nodes.append({'text': text, 'bounds': bounds})
+
+            # 定位"粉丝"标签节点，然后在其左侧同行找数字节点
+            for fan_node in visible_nodes:
+                if fan_node['text'] != '粉丝':
+                    continue
+                fb = fan_node['bounds']
+                fan_top = fb.get('top', 0)
+                fan_bottom = fb.get('bottom', 0)
+                fan_left = fb.get('left', 0)
+                fan_center_y = (fan_top + fan_bottom) // 2
+
+                # 在同行寻找数字节点（通常在"粉丝"标签左侧）
+                # 数字节点可能形如 "7146"、"1.2万"、"3w" 等
+                number_re = re.compile(r'^\d+(?:\.\d+)?\s*[万wWkK]?$')
+                same_row_numbers = []
+                for cand in visible_nodes:
+                    cb = cand['bounds']
+                    cand_top = cb.get('top', 0)
+                    cand_bottom = cb.get('bottom', 0)
+                    cand_center_y = (cand_top + cand_bottom) // 2
+                    # 判断是否同行：中心点 y 在"粉丝"节点的 top~bottom 范围内（带容差）
+                    if abs(cand_center_y - fan_center_y) > max(15, (fan_bottom - fan_top) // 2):
+                        continue
+                    # 数字节点通常在"粉丝"左侧
+                    if cb.get('right', 0) > fan_left + 30:
+                        continue
+                    if number_re.match(cand['text']):
+                        same_row_numbers.append(cand)
+
+                if same_row_numbers:
+                    # 取最靠近"粉丝"标签的那个数字节点
+                    same_row_numbers.sort(key=lambda c: abs(c['bounds'].get('right', 0) - fan_left))
+                    count = self._parse_follower_text(same_row_numbers[0]['text'])
+                    if count:
+                        logger.info(f"从分离节点提取到粉丝数: {same_row_numbers[0]['text']}")
+                        return count
+
+            # 方式3: 兜底遍历查找带"万"的纯数字节点
+            for node in visible_nodes:
+                text = node['text']
+                if ('万' in text or 'w' in text or 'W' in text) and len(text) <= 8:
                     count = self._parse_follower_text(text)
                     if count:
                         return count
-            
+
             return None
         except Exception as e:
             logger.warning(f"提取粉丝数量失败: {e}")
             return None
-    
+
     def _parse_follower_text(self, text):
-        """解析粉丝数字符串（支持"123万"、"123.4万"、"123456"等格式）"""
+        """解析粉丝数字符串并转换为"万"为单位
+
+        支持的格式：
+        - "1234粉丝" / "粉丝1234"（合并显示，原始粉丝数）
+        - "1.2万粉丝" / "粉丝1.2万"（合并显示，万为单位）
+        - "1.2万" / "3w"（带单位的纯数字）
+        - "7146"（独立数字，抖音新版 UI 数字和"粉丝"标签分离）
+
+        返回值统一为"万"为单位（float），例如 7146 粉丝返回 0.7146。
+        """
         if not text:
             return None
-        
+
+        text = text.strip()
+        has_wan_suffix = ('万' in text or 'W' in text or 'w' in text)
+
         for pattern in self._FOLLOWER_PATTERNS:
             match = pattern.search(text)
-            if match:
-                try:
-                    num_str = match.group(1)
-                    value = float(num_str)
-                    # 如果文本中包含"万"，已经是万为单位；否则转换为万
-                    if '万' in text or 'W' in text or 'w' in text:
-                        return value
-                    else:
-                        # 小于6位的数字可能是直接显示的万数，大于等于6位是具体粉丝数
-                        if len(num_str) >= 6:
-                            return value / 10000
-                        else:
-                            return value
-                except ValueError:
-                    continue
-        
+            if not match:
+                continue
+            try:
+                num_str = match.group(1)
+                value = float(num_str)
+            except (ValueError, IndexError):
+                continue
+
+            if has_wan_suffix:
+                # 带万/w/W 后缀，数值已经是万为单位
+                return value
+            else:
+                # 无后缀，是原始粉丝数，转换为万
+                return value / 10000
+
         return None
 
     def _is_video_page_ready(self):
@@ -521,20 +617,20 @@ class FollowAuthorAction(BaseAction):
         return len(comment_nodes) > 0 and len(share_nodes) > 0
 
     def _return_to_video_page(self):
-        """从作者主页稳定返回视频页"""
-        for attempt in range(3):
+        """从作者主页/私信页稳定返回视频页。"""
+        for attempt in range(2):
             if self._is_video_page_ready():
                 logger.info("确认已经回到视频页")
                 return True
-            logger.info(f"尝试返回视频页... ({attempt + 1}/3)")
+            logger.info(f"尝试返回视频页... ({attempt + 1}/2)")
             self.d.press("back")
-            time.sleep(2)
-            
+            self.human_sleep('normal')
+
         if self._is_video_page_ready():
             logger.info("确认已经回到视频页")
             return True
-            
-        logger.warning("未能可靠确认已返回视频页，继续尝试后续流程")
+
+        logger.warning("未能可靠确认已返回视频页")
         return False
 
 class GetCurrentVideoLinkAction(BaseAction):
@@ -546,11 +642,14 @@ class GetCurrentVideoLinkAction(BaseAction):
 
     def execute(self):
         visible_description = self._extract_visible_description()
+        if not self.config.get('crawler', {}).get('extract_share_link', False):
+            return self._fallback_video_info(visible_description, "稳定模式未打开分享面板提取链接")
+
         panel_opened = False
         try:
             share_clicked = False
             logger.info("正在定位分享按钮...")
-            
+
             # 1. 动态 Content-Desc 定位
             if self.d.xpath(L.SHARE_BTN_DYNAMIC).click_exists(timeout=3):
                 logger.info("通过动态 Content-Desc 成功点击分享按钮")
@@ -561,7 +660,7 @@ class GetCurrentVideoLinkAction(BaseAction):
                 logger.info("尝试通过屏幕下方 TextView 定位...")
                 all_text_nodes = self.d.xpath(L.VIDEO_DESC_TEXT_VIEW).all()
                 candidate_nodes = [n for n in all_text_nodes if n.text == "分享" or (n.text and n.text.isdigit())]
-                
+
                 if candidate_nodes:
                     candidate_nodes.sort(key=lambda x: x.info['bounds']['bottom'], reverse=True)
                     target_node = candidate_nodes[0]
@@ -574,9 +673,9 @@ class GetCurrentVideoLinkAction(BaseAction):
             if not share_clicked:
                 logger.error("所有定位方式均未找到分享按钮")
                 return None
-            
-            time.sleep(2)
-            
+
+            time.sleep(random.uniform(1.5, 2.5))
+
             # 3. 检查分享面板
             panel_id = self.config.get('ui_ids', {}).get('share_panel', L.SHARE_PANEL_CONTAINER)
             container = self.d(resourceId=panel_id)
@@ -584,18 +683,21 @@ class GetCurrentVideoLinkAction(BaseAction):
                 logger.error("分享面板未打开")
                 return self._fallback_video_info(visible_description, "分享面板未打开")
             panel_opened = True
-            
-            # 4. 滑动并复制链接
+
+            # 4. 滑动并复制链接（人性化滑动）
             bounds = container.info['bounds']
             center_y = (bounds['top'] + bounds['bottom']) / 2
-            self.d.swipe(bounds['right'] * 0.8, center_y, bounds['right'] * 0.2, center_y, duration=0.2)
-            time.sleep(1)
-            
+            self.human_swipe(
+                int(bounds['right'] * 0.8), int(center_y),
+                int(bounds['right'] * 0.2), int(center_y)
+            )
+            self.human_sleep('fast')
+
             copy_btn = self.d.xpath(L.COPY_LINK_BTN)
             if copy_btn.wait(timeout=5):
                 copy_btn.click()
-                time.sleep(1.5)
-                
+                self.human_sleep('normal', custom_range=(1.0, 2.0))
+
                 raw_text = self._read_clipboard()
                 parsed = self._parse_share_text(raw_text, visible_description)
                 if parsed:
@@ -617,11 +719,11 @@ class GetCurrentVideoLinkAction(BaseAction):
             panel_id = self.config.get('ui_ids', {}).get('share_panel', L.SHARE_PANEL_CONTAINER)
             w, h = self.d.window_size()
             if self.d(resourceId=panel_id).exists or self.d.xpath(L.COPY_LINK_BTN).exists:
-                self.d.click(int(w * 0.5), int(h * 0.2))
-                time.sleep(0.8)
+                self.human_click(int(w * 0.5), int(h * 0.2))
+                self.human_sleep('fast')
             if self.d(resourceId=panel_id).exists or self.d.xpath(L.COPY_LINK_BTN).exists:
                 self.d.press("back")
-                time.sleep(1)
+                self.human_sleep('fast')
             logger.info("已尝试关闭分享面板")
         except Exception as exc:
             logger.warning(f"关闭分享面板失败: {exc}")
